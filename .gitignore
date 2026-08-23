@@ -55,8 +55,14 @@ appsettings.*.local.json
 *.pem
 *.cer
 *.crt
-*credential*
-*secrets*
+## Narrow, file-convention patterns only - a blanket *credential*/*secrets* previously
+## matched (and silently dropped from version control) legitimate source files like
+## CredentialStore.cs. Match actual secret-file conventions instead.
+*.credentials
+credentials.json
+*.secrets
+secrets.json
+appsettings.secrets.json
 
 ## User-specific files
 *.suo
