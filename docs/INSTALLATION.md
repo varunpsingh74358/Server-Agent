@@ -187,6 +187,23 @@ Installation directory: C:\Program Files\CloudOrc\Agents
 Both components are selected by default; accepting every default requires zero manual
 configuration - no `appsettings.json` editing, no .NET install, no Git install.
 
+### Enrollment (connecting to a real backend with zero manual configuration)
+
+Pass `--token` to enroll the agent with a backend automatically - no backend URL, no IP
+address, and no `appsettings.json` editing, ever:
+
+```powershell
+CloudOrcAgentSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART --token "ENR-..."
+```
+
+The installer redeems the token (via the Control Agent's own `enroll` CLI mode) **before**
+starting any service - a bad/expired/already-used token fails the whole install with a
+clear message and a non-zero exit code, rather than starting a misconfigured service. See
+[ENROLLMENT.md](ENROLLMENT.md) for the full architecture (token format, why it's designed
+this way, security properties, and what a real backend needs to implement). Omitting
+`--token` installs in local-only mode exactly as described above - both are fully
+supported, permanently.
+
 ## G. Upgrade
 
 Run the same installer (any distribution method above) again, pointing at a newer

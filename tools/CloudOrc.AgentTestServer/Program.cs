@@ -1,4 +1,6 @@
+using CloudOrc.Agent.Contracts.Enrollment;
 using CloudOrc.AgentTestServer;
+using CloudOrc.AgentTestServer.Enrollment;
 
 // ============================================================================
 // DEVELOPMENT / TESTING ONLY - this is a local stand-in for the real CloudOrc
@@ -41,14 +43,21 @@ builder.WebHost.UseUrls($"http://{bindAddress}:{port}");
 builder.Logging.ClearProviders();
 
 builder.Services.AddSingleton<AgentSession>();
+builder.Services.AddSingleton<EnrollmentTokenStore>();
+builder.Services.AddSingleton<CredentialStore>();
 
 var app = builder.Build();
+
+// The enrollment endpoint this server issues in every token it hands out - "resolving
+// the environment" for this dev/test stand-in just means "point back at myself", exactly
+// as its WSS endpoint already does for BackendUrl below.
+var enrollmentUrl = $"http://{bindAddress}:{port}/api/enroll";
 
 app.UseWebSockets();
 
 app.MapGet("/", () => "CloudOrc Agent Test Server - DEVELOPMENT TESTING ONLY. Connect a WebSocket to /agent.");
 
-app.Map("/agent", async (HttpContext context, AgentSession session, CancellationToken cancellationToken) =>
+app.Map("/agent", async (HttpContext context, AgentSession session, CredentialStore credentials, CancellationToken cancellationToken) =>
 {
     if (!context.WebSockets.IsWebSocketRequest)
     {
@@ -56,8 +65,83 @@ app.Map("/agent", async (HttpContext context, AgentSession session, Cancellation
         return;
     }
 
+    // Authenticated (enrolled) agents present "Authorization: Bearer <credential>" on the
+    // handshake. Absent entirely is still accepted, to preserve the existing
+    // pre-enrollment local dev/test flow (dotnet run --BackendConnection:Enabled=true...
+    // with no enrollment at all) - this tool is DEV/TEST ONLY, so that leniency is
+    // deliberate and would never be appropriate in a real backend.
+    var authHeader = context.Request.Headers.Authorization.ToString();
+    if (!string.IsNullOrEmpty(authHeader))
+    {
+        const string bearerPrefix = "Bearer ";
+        if (!authHeader.StartsWith(bearerPrefix, StringComparison.Ordinal) ||
+            !credentials.IsValid(authHeader[bearerPrefix.Length..]))
+        {
+            Console.WriteLine("[test-server] Rejected WebSocket handshake: invalid or revoked credential.");
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+    }
+
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
     await AgentConnectionHandler.RunAsync(socket, session, cancellationToken);
+});
+
+// ----------------------------------------------------------------------------------
+// Enrollment API - DEVELOPMENT/TEST ONLY reference implementation. A real backend's
+// enrollment service would look identical in contract (same request/response shapes,
+// same token semantics) but be backed by a real database, real credential rotation, and
+// real revocation/audit - see docs/ENROLLMENT.md for exactly what production needs on
+// top of this reference shape.
+// ----------------------------------------------------------------------------------
+
+app.MapPost("/api/enrollment-tokens", (IssueEnrollmentTokenRequest? request, EnrollmentTokenStore tokens) =>
+{
+    var validFor = TimeSpan.FromSeconds(request?.ValidForSeconds ?? 900);
+    var token = tokens.IssueToken(enrollmentUrl, validFor);
+    Console.WriteLine($"[test-server] Issued a new enrollment token (valid for {validFor.TotalSeconds:F0}s).");
+    return Results.Ok(new { token });
+});
+
+app.MapPost("/api/enrollment-tokens/revoke", (RevokeEnrollmentTokenRequest request, EnrollmentTokenStore tokens) =>
+{
+    var revoked = tokens.RevokeByToken(request.Token);
+    return revoked
+        ? Results.Ok(new { revoked = true })
+        : Results.BadRequest(new { revoked = false, error = "Token not found, or already used/expired/revoked." });
+});
+
+app.MapPost("/api/credentials/revoke", (RevokeCredentialRequest request, CredentialStore credentials) =>
+{
+    var revoked = credentials.Revoke(request.Credential);
+    return revoked
+        ? Results.Ok(new { revoked = true })
+        : Results.BadRequest(new { revoked = false, error = "Credential not found." });
+});
+
+app.MapPost("/api/enroll", (EnrollmentRequest request, EnrollmentTokenStore tokens, CredentialStore credentials) =>
+{
+    var validation = tokens.ValidateAndConsume(request.Secret);
+    if (!validation.IsValid)
+    {
+        Console.WriteLine($"[test-server] Enrollment rejected for machine '{request.MachineName}': {validation.Error}");
+        return Results.BadRequest(new { error = validation.Error });
+    }
+
+    var agentId = $"agent-{Guid.NewGuid():N}"[..14];
+    const string serverId = "local-test-server";
+    var credential = credentials.IssueCredential(agentId);
+    var backendUrl = $"ws://{bindAddress}:{port}/agent";
+
+    Console.WriteLine($"[test-server] Enrolled new agent: agentId={agentId}, machineName={request.MachineName}, machineId={request.MachineId}.");
+
+    return Results.Ok(new EnrollmentResponse
+    {
+        AgentId = agentId,
+        ServerId = serverId,
+        BackendUrl = backendUrl,
+        Credential = credential
+    });
 });
 
 // Scriptable alternative to typing "send ..." at the console - useful for automated

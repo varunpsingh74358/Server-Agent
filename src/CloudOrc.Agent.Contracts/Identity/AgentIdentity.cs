@@ -20,4 +20,12 @@ public sealed class AgentIdentity
     public required string MachineName { get; init; }
 
     public required string AgentVersion { get; init; }
+
+    /// <summary>
+    /// Permanent per-agent bearer credential issued during enrollment, or null when this
+    /// agent has not been enrolled (local-testing config-based identity only). Never log
+    /// or serialize this value - it is only ever read to set the WebSocket handshake's
+    /// Authorization header in <c>BackendConnectionService</c>.
+    /// </summary>
+    public string? Credential { get; init; }
 }

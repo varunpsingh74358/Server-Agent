@@ -21,6 +21,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CloudOrc.AgentTestServer", "tools\CloudOrc.AgentTestServer\CloudOrc.AgentTestServer.csproj", "{C68F194C-2FE4-475D-AC7F-2EA56C07A6E1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CloudOrc.AgentTestServer.Tests", "tests\CloudOrc.AgentTestServer.Tests\CloudOrc.AgentTestServer.Tests.csproj", "{392531F4-03F6-4FC8-9834-6F78C451158F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -103,6 +105,18 @@ Global
 		{C68F194C-2FE4-475D-AC7F-2EA56C07A6E1}.Release|x64.Build.0 = Release|Any CPU
 		{C68F194C-2FE4-475D-AC7F-2EA56C07A6E1}.Release|x86.ActiveCfg = Release|Any CPU
 		{C68F194C-2FE4-475D-AC7F-2EA56C07A6E1}.Release|x86.Build.0 = Release|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Debug|x64.Build.0 = Debug|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Debug|x86.Build.0 = Debug|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Release|x64.ActiveCfg = Release|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Release|x64.Build.0 = Release|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Release|x86.ActiveCfg = Release|Any CPU
+		{392531F4-03F6-4FC8-9834-6F78C451158F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -114,5 +128,6 @@ Global
 		{78630EA0-A453-4075-9AEF-251332316365} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{3EB435AE-DFBA-4479-AD04-04743761CF68} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{C68F194C-2FE4-475D-AC7F-2EA56C07A6E1} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{392531F4-03F6-4FC8-9834-6F78C451158F} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

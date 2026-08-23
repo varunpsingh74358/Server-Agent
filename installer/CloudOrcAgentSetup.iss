@@ -193,6 +193,51 @@ begin
   end;
 end;
 
+// Reads --token "<value>", --token=<value>, or /TOKEN=<value> from the installer's own
+// command line. This is the ONLY server-specific value an administrator ever supplies -
+// no backend URL, no IP address, nothing else. Returns '' if no token was given (a valid,
+// supported case: a local-only install with no backend enrollment, e.g. for local
+// development/testing exactly as before enrollment existed).
+function GetTokenParam(): String;
+var
+  i: Integer;
+  p, upperP: String;
+begin
+  Result := '';
+  for i := 1 to ParamCount do
+  begin
+    p := ParamStr(i);
+    upperP := Uppercase(p);
+    if (upperP = '--TOKEN') and (i < ParamCount) then
+    begin
+      Result := ParamStr(i + 1);
+      Exit;
+    end;
+    if Copy(upperP, 1, 8) = '--TOKEN=' then
+    begin
+      Result := Copy(p, 9, MaxInt);
+      Exit;
+    end;
+    if Copy(upperP, 1, 7) = '/TOKEN=' then
+    begin
+      Result := Copy(p, 8, MaxInt);
+      Exit;
+    end;
+  end;
+end;
+
+// Shells out to the just-deployed Control Agent's own `enroll` CLI mode (see
+// EnrollmentCommandLine.cs) rather than reimplementing HTTP/JSON in Pascal Script - the
+// .NET side already has a real HttpClient and does the actual token decode + POST +
+// DPAPI-encrypted persistence. This installer only needs to know whether it succeeded.
+function RunEnrollment(ControlAgentExe, Token: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ControlAgentExe, 'enroll --token "' + Token + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0);
+end;
+
 function ReadFileIfExists(FileName: String; var Content: String): Boolean;
 var
   Lines: TArrayOfString;
@@ -219,6 +264,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   controlAgentExe, watchdogExe: String;
   controlAgentDir, watchdogDir: String;
+  token: String;
 begin
   controlAgentDir := ExpandConstant('{app}\ControlAgent');
   watchdogDir := ExpandConstant('{app}\WatchdogAgent');
@@ -254,6 +300,19 @@ begin
 
     if WizardIsComponentSelected('controlagent') then
     begin
+      // One-time enrollment, if a token was supplied. Runs BEFORE the service is
+      // created/started so a failed enrollment never leaves a service running with no
+      // valid backend configuration - and never partially consumes/wastes the token
+      // (EnrollmentCommandLine only persists state after the backend confirms success).
+      token := GetTokenParam();
+      if token <> '' then
+      begin
+        Log('Enrollment token supplied - running one-time enrollment before starting services.');
+        if not RunEnrollment(controlAgentExe, token) then
+          FailInstall('Enrollment failed - the Control Agent could not be enrolled with the supplied token. Check the token and try again; see C:\ProgramData\CloudOrc\ControlAgent\logs\ for details.', 20);
+        Log('Enrollment succeeded.');
+      end;
+
       InstallOrUpdateService('{#ControlAgentServiceName}', 'CloudOrc Control Agent',
         'Generic local PowerShell execution engine for CloudOrc.', controlAgentExe);
       if not StartServiceAndVerify('{#ControlAgentServiceName}') then

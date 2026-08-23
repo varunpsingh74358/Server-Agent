@@ -77,17 +77,22 @@ been pointed at so far.
 
 ## What's still missing for production
 
-None of the following exist yet. This isn't an oversight - implementing them against a
-backend that doesn't exist yet (from this repository's point of view) would mean
-guessing at a protocol instead of integrating with a real one.
+Unique agent identity, one-time enrollment, and agent-specific credentials are **now
+implemented** - see [ENROLLMENT.md](ENROLLMENT.md) for the full design
+(`CloudOrc.ControlAgent.exe enroll --token "ENR-..."`, DPAPI-encrypted persisted identity,
+WebSocket bearer-credential authentication). What remains below is what a **real
+production backend** still needs to add on top of the reference (dev/test-only, in-memory)
+enrollment backend shipped in `tools/CloudOrc.AgentTestServer` - none of it requires
+further agent-side changes.
 
 | Concept | Where it plugs in | Notes |
 |---|---|---|
-| Unique Agent Identity | `AgentIdentityOptions`/`AgentIdentityProvider` | Currently just configured strings; a real deployment would get `AgentId` from an enrollment response, not a config file |
-| One-time Enrollment | A setup step run once per agent installation, before `BackendConnectionService` ever connects | Would likely write the issued `AgentId`/credential into a location `AgentIdentityProvider` reads from |
-| Agent-specific Credentials | Presented during the WebSocket handshake or in `HelloMessage` | Not in `HelloMessage` today - would be an additive field |
-| TLS (`wss://`) | The connection URL itself | Already supported by `ClientWebSocket`/`BackendConnectionOptions` - just needs a `wss://` URL and a trusted certificate on the backend side |
-| Short-lived Access Tokens + Rotation | Managed by `BackendConnectionService` (or a new dedicated component it depends on), refreshed on a timer independent of the reconnect loop | Not implemented; `AgentIdentity` has no token field yet |
+| ~~Unique Agent Identity~~ | `EnrolledStateStore`/`AgentIdentityProvider` | **Implemented** - `AgentId`/`ServerId` come from the enrollment response, persisted encrypted, never regenerated |
+| ~~One-time Enrollment~~ | `EnrollmentCommandLine`, run once by the installer before any service starts | **Implemented** - see [ENROLLMENT.md](ENROLLMENT.md) |
+| ~~Agent-specific Credentials~~ | `Authorization: Bearer <credential>` on the WebSocket handshake | **Implemented** - additive; `HelloMessage`'s own shape is unchanged |
+| A real, persistent enrollment backend | Replaces `tools/CloudOrc.AgentTestServer`'s in-memory `EnrollmentTokenStore`/`CredentialStore` | Same request/response contract (`EnrollmentRequest`/`EnrollmentResponse`) - a database-backed implementation is a drop-in replacement, no agent/installer change needed |
+| TLS (`wss://`) | The connection URL itself | Already supported by `ClientWebSocket`/`BackendConnectionOptions`, and already what an enrollment response would hand back - just needs a trusted certificate on the backend side |
+| Credential Rotation | A new endpoint/message the agent would call on a timer to exchange its current credential for a new one | Not implemented; today's credential is long-lived once issued (revocable, but not automatically rotated) |
 | RBAC | Enforced entirely on the backend before it ever sends a `COMMAND` | The agent already validates and executes whatever a `COMMAND` message contains - it has no concept of permissions and isn't expected to |
 | Audit Logs | Backend-side, built from the `COMMAND_RESULT`/`COMMAND_STATUS` stream already being sent | No agent-side change needed |
 | Command Expiry | An extra field on `CommandRequest`/`CommandMessage` + a check alongside `CommandRequestValidator.Validate` | Would reject a `COMMAND` whose `createdAt` is too old, the same validation layer that already rejects malformed commands |

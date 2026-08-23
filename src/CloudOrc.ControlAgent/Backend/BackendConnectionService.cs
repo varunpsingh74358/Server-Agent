@@ -84,6 +84,15 @@ public sealed class BackendConnectionService(
         using var socket = new ClientWebSocket();
         health.SetBackendConnectionState(BackendConnectionState.Connecting);
 
+        // Present the enrollment-issued permanent credential (never the one-time
+        // enrollment secret) on the handshake itself, before any protocol message is
+        // exchanged. Absent entirely for a non-enrolled, local-testing agent - the
+        // backend/test server side decides whether to require it.
+        if (!string.IsNullOrEmpty(identity.Credential))
+        {
+            socket.Options.SetRequestHeader("Authorization", $"Bearer {identity.Credential}");
+        }
+
         using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
         {
             connectCts.CancelAfter(TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds));

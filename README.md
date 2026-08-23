@@ -253,15 +253,22 @@ script deployment path (no installer EXE) is still available and documented in
 
 The WebSocket layer connects over plain `ws://` for local testing, and refuses to start
 with an insecure URL unless `BackendConnection.DevelopmentAllowInsecureWs` is explicitly
-set to `true` - there is no path to accidentally end up connected insecurely. This
-version deliberately does **not** implement: production backend authentication, JWT, API
-keys, WebSocket authentication, agent enrollment, production tokens, database
-credentials, or cloud credentials. There are no fake/hardcoded secrets pretending to
-provide security. The architecture is shaped so these can be added later purely at the
-transport layer - see
-[docs/FUTURE_BACKEND_INTEGRATION.md](docs/FUTURE_BACKEND_INTEGRATION.md) for exactly
-where each future concept (enrollment, credential rotation, RBAC, audit logs, command
-expiry, replay protection, live output streaming) would plug in.
+set to `true` (or the URL came from a completed enrollment - see below) - there is no path
+to accidentally end up connected insecurely.
+
+**Agent enrollment and WebSocket bearer-credential authentication are now implemented** -
+see [docs/ENROLLMENT.md](docs/ENROLLMENT.md). An administrator supplies a one-time
+enrollment token (`CloudOrcAgentSetup.exe --token "ENR-..."`); the agent redeems it,
+receives its `AgentId`/`ServerId`/backend URL/permanent credential, stores them
+DPAPI-encrypted, and presents the credential on every WebSocket connection - with zero
+hardcoded backend URL anywhere in the agent or installer, and zero manual
+`appsettings.json` editing. This repository ships the full agent-side implementation plus
+a reference (dev/test-only, in-memory) enrollment backend in
+`tools/CloudOrc.AgentTestServer`; a **real production backend** implementing the same
+request/response contract is still a separate integration task - see
+[docs/FUTURE_BACKEND_INTEGRATION.md](docs/FUTURE_BACKEND_INTEGRATION.md) for what's left
+(a persistent token/credential database, RBAC, audit logs, command expiry, replay
+protection, live output streaming) beyond what's already built.
 
 The local file transport also provides **at-least-once, not exactly-once** command
 execution - see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#duplicate-protection-and-delivery-semantics-read-this-before-assuming-exactly-once)

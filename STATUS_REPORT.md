@@ -4,6 +4,7 @@
 **Phase 1 (local file execution):** **COMPLETE and VERIFIED**
 **Phase 2 (local WebSocket testing layer):** **COMPLETE and VERIFIED**
 **Phase 2.5 (final validation + self-contained deployment packaging):** **COMPLETE and VERIFIED**
+**Phase 2.6 (GitHub-based installer distribution):** **COMPLETE and VERIFIED — live on a real public GitHub repository**
 **Phase 3 (real backend connection + production security):** **NOT STARTED**
 
 --- 
@@ -45,6 +46,10 @@ security (TLS in production, enrollment, credentials) exists yet — see section
 | Self-contained `win-x64` publish for both agents | ✅ **New — produced and verified this phase** |
 | `scripts/install-agent.ps1` / `scripts/uninstall-agent.ps1` | ✅ **New — written and run for real this phase** |
 | Real Windows Service install + real Watchdog-triggered restart | ✅ **New — performed for real this phase, not just documented** |
+| `CloudOrcAgentSetup.exe` (single-file Inno Setup installer) | ✅ **New — built, and installed for real from a live GitHub Release** |
+| `install-cloudorc.ps1` (one-line bootstrap: `irm ... \| iex`) | ✅ **New — installs from GitHub Releases with SHA256 verification; a real `Start-Process -Verb RunAs` hang bug was found and fixed live** |
+| `.github/workflows/build-agent-release.yml` + `build-installer.yml` | ✅ **New — both build+test+package on every push, and publish a GitHub Release with all assets on a `v*` tag; a release-creation race condition between the two was found and fixed live** |
+| Public GitHub repository with a real `v1.0.0` release | ✅ **New — `github.com/varunpsingh74358/Server-Agent`, installer verified end-to-end against the real release, not a local mock** |
 
 ### Control Agent — feature checklist
 
@@ -193,9 +198,48 @@ install → verify-running → uninstall → verify-removed cycle succeeded.
    actually started, so external cancellation had no effect.
 2. **(Phase 2)** The local test server's console-input loop crashed on end-of-input in a
    non-interactive context — fixed to only shut down on an explicit `exit`/`quit`.
-3. **(Phase 2.5, this phase)** `scripts/install-agent.ps1` used `$PSScriptRoot` inside a
+3. **(Phase 2.5)** `scripts/install-agent.ps1` used `$PSScriptRoot` inside a
    parameter default value, which is empty on this PowerShell host at parameter-binding
    time — fixed by resolving the script root inside the script body instead.
+4. **(Phase 2.6)** `installer/CloudOrcAgentSetup.iss`'s `RaiseException` did **not**
+   reliably propagate to the process exit code from `ssPostInstall` under `/VERYSILENT`
+   (confirmed empirically: it returned exit code 0 even after "raising") - replaced with a
+   direct Win32 `ExitProcess` call, verified with an isolated test before being applied.
+5. **(Phase 2.6)** Both GitHub Actions workflows triggered on the same `v*` tag and both
+   tried to `gh release create` for it - whichever finished second failed with HTTP 422
+   "tag_name already exists". Fixed by checking for an existing release first and falling
+   back to `gh release upload`, with a race-safe retry if `create` itself loses a narrow
+   timing race.
+6. **(Phase 2.6)** `install-cloudorc.ps1` used `Start-Process -Verb RunAs -Wait`
+   unconditionally. Confirmed live on a real target server: when the calling PowerShell
+   session was **already elevated**, `-Verb RunAs` (re-elevating an already-elevated
+   session) caused `-Wait` to hang indefinitely even though the installer had already
+   finished completely (files deployed, services created, no process left running) - a
+   known Windows process-tracking limitation in that specific "elevated re-elevating"
+   case, seen over an RDP session. Fixed by detecting existing elevation and skipping
+   `-Verb RunAs` in that case, plus replacing the bare `-Wait` with a polling loop that
+   prints progress and gives a clear diagnostic message instead of hanging silently.
+
+### 3.9 GitHub-based installer distribution - verified against a real, live GitHub repository
+
+Not simulated - this was run against `github.com/varunpsingh74358/Server-Agent`, a real
+public repository, with a real `v1.0.0` release:
+
+1. Repository pushed for real (`git init`/`add`/`commit`/`push`), with `.claude/` (local
+   AI-assistant tool state) correctly excluded from version control.
+2. Both GitHub Actions workflows confirmed running automatically on push, both completing
+   with `conclusion: success`.
+3. `git tag v1.0.0 && git push origin v1.0.0` confirmed to trigger the release jobs and
+   (after the race-condition fix above) produce one GitHub Release, **"CloudOrc Agent
+   v1.0.0"**, with all four assets: `CloudOrcAgentSetup.exe`, `.sha256`,
+   `CloudOrcAgents-win-x64.zip`, `.sha256`.
+4. `install-cloudorc.ps1` run for real via `irm https://raw.githubusercontent.com/.../install-cloudorc.ps1 | iex`
+   (and directly with `-Version v1.0.0`): downloaded the real release asset, verified its
+   SHA256 against the real published checksum, installed silently, and confirmed both
+   services `RUNNING` with a real command (`Get-Date`) executed successfully - all against
+   the actual published release, not a local mock server.
+5. The elevation-hang bug (§3.8 item 6) was discovered on this real run, fixed, pushed to
+   `main`, and re-verified live before being considered resolved.
 
 ---
 
@@ -470,14 +514,15 @@ publish — no separate install step needed on the target machine).
 
 ## 10. Recommended Next Steps
 
-1. **Deploy to an actual second Windows Server** using §6 above and confirm the two
-   remaining manual scenarios in `docs/DEPLOYMENT_TEST_PLAN.md` (reboot-survival and
-   cross-machine backend connectivity) — these were the only two things this validation
-   phase could not exercise on a single development machine.
-2. **Stand up a minimal real (or real-shaped) backend endpoint** that speaks the protocol
-   in `CloudOrc.Agent.Contracts.Protocol` — even a rough version lets you test
-   `BackendConnection` against something closer to production than
-   `tools/CloudOrc.AgentTestServer`.
+1. ~~Deploy to an actual second Windows Server~~ - **done** (§3.9): the installer has now
+   been run against a real second server via the public GitHub Release, not just this
+   development machine. The two scenarios that still specifically need a genuine reboot
+   (not performed, on purpose, against this or any server so far) remain in
+   `docs/DEPLOYMENT_TEST_PLAN.md` TESTs 23–26.
+2. **Build your real backend against the documented protocol** and wire the agent to it -
+   see [12. Using CloudOrc Agent With Your Own Backend Code](#12-using-cloudorc-agent-with-your-own-backend-code)
+   below for exactly how to do this on your local machine right now, and after your
+   backend is itself deployed.
 3. When ready, start **Phase 3**: switch `BackendConnection.Url` to a real `wss://`
    endpoint and design the actual enrollment/credential mechanism — see
    [docs/FUTURE_BACKEND_INTEGRATION.md](docs/FUTURE_BACKEND_INTEGRATION.md) for the exact
@@ -496,4 +541,130 @@ publish — no separate install step needed on the target machine).
 - [docs/WINDOWS_SERVICE_INSTALLATION.md](docs/WINDOWS_SERVICE_INSTALLATION.md) — publish & install as a service (framework-dependent variant)
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — **self-contained package deployment to another server, end to end**
 - [docs/DEPLOYMENT_TEST_PLAN.md](docs/DEPLOYMENT_TEST_PLAN.md) — **the fixed 26-test deployment validation checklist and what's already verified vs. manual**
+- [docs/INSTALLATION.md](docs/INSTALLATION.md) — **the `CloudOrcAgentSetup.exe` installer: build, GitHub Actions/release, one-line install, upgrade, uninstall, private-repo limitations**
 - [docs/FUTURE_BACKEND_INTEGRATION.md](docs/FUTURE_BACKEND_INTEGRATION.md) — what's left before the real backend
+
+---
+
+## 12. Using CloudOrc Agent With Your Own Backend Code
+
+Everything above gets the agent installed and running. This section is the practical
+answer to **"the agent is built and installable - how do I actually make my own
+backend/project talk to it?"** - both right now, on your local machine, and after your own
+backend is itself deployed somewhere.
+
+### 12.1 The one fact that drives everything below
+
+The Control Agent's WebSocket client is **fully built and already works** - it was
+verified live in §3.3 and §3.9 against `tools/CloudOrc.AgentTestServer`, a small
+reference implementation included in this repo. What does **not** exist yet is the real
+backend on the other end of that connection. So "using this with your code" means: **your
+backend needs to speak the same protocol** that `tools/CloudOrc.AgentTestServer` already
+speaks - there is no separate "integration API" to learn beyond that WebSocket protocol.
+
+The protocol itself lives in `CloudOrc.Agent.Contracts.Protocol` (shared by both sides in
+this repo) and is plain JSON over a WebSocket:
+
+| Message | Direction | Purpose |
+|---|---|---|
+| `HELLO` | Agent → Backend | Sent once on connect: `agentId`, `serverId`, real `machineId`/`machineName`, agent version |
+| `HEARTBEAT` | Agent → Backend | Periodic (`HeartbeatIntervalSeconds`): liveness + current command status |
+| `TELEMETRY` | Agent → Backend | Periodic (`TelemetryIntervalSeconds`): CPU/memory/disks/uptime |
+| `COMMAND` | Backend → Agent | A script to run (`commandId`, `script`, `timeoutSeconds`) |
+| `COMMAND_STATUS` | Agent → Backend | `Queued` → `Running` for a given `commandId` |
+| `COMMAND_RESULT` | Agent → Backend | Terminal result: `Success`/`Failed`/`Timeout`/`Cancelled` + output/error |
+| `PING` | Backend → Agent | Optional keepalive |
+
+Read `tools/CloudOrc.AgentTestServer/AgentConnectionHandler.cs` for a complete, working
+reference of the backend side of this exchange - it is intentionally small and readable.
+
+### 12.2 Right now, on your local machine (development)
+
+You do not need to wait for your backend to be "finished" to start integrating -
+develop it iteratively against a running Control Agent exactly the way
+`tools/CloudOrc.AgentTestServer` was used throughout this project:
+
+1. Run the Control Agent locally with backend connectivity pointed at **your own backend's
+   dev instance** instead of the test server:
+
+   ```powershell
+   cd src\CloudOrc.ControlAgent
+   dotnet run --BackendConnection:Enabled=true --BackendConnection:Url=ws://localhost:<your-backend-port>/agent --BackendConnection:DevelopmentAllowInsecureWs=true
+   ```
+
+   (`DevelopmentAllowInsecureWs=true` is required for `ws://` - this is a local-only
+   safety switch, not something to carry into production; see 12.3.)
+
+2. In your backend, implement a WebSocket endpoint that: accepts the inbound connection,
+   reads the `HELLO`, and can send a `COMMAND` message whenever you want a script run on
+   this machine - then reads back `COMMAND_STATUS`/`COMMAND_RESULT`. Model this directly
+   on `AgentConnectionHandler.cs` from `tools/CloudOrc.AgentTestServer` - same message
+   shapes, same flow, any backend language/framework works since it's just JSON-over-WS.
+3. Everything already proven in this repo works identically against your backend once it
+   speaks the protocol: multiple commands, timeouts, failures, reconnect-with-backoff if
+   your backend restarts, and local file commands (`ControlAgent.LocalFileModeEnabled`)
+   continuing to work at the same time with zero interference (§3.3).
+4. Installed-as-a-service testing works the same way too - point the **installed**
+   Control Agent's `appsettings.json` (`C:\Program Files\CloudOrc\Agents\ControlAgent\appsettings.json`
+   if installed via `CloudOrcAgentSetup.exe`, or wherever you installed it via the
+   ZIP/script path) at your dev backend and `Restart-Service CloudOrcControlAgent`.
+5. Keep `tools/CloudOrc.AgentTestServer` around as a reference/fallback while building -
+   it is useful for isolating "is this an agent problem or a my-backend problem" by
+   swapping the `Url` back to it.
+
+### 12.3 After your backend is deployed (not local anymore)
+
+Once your backend itself is running somewhere reachable (your own server, a cloud host,
+etc.), each managed Windows Server's Control Agent needs to be pointed at it:
+
+1. **Get the agent onto each server** using the installer distribution built in Phase 2.6
+   - either the one-line bootstrap:
+
+   ```powershell
+   irm https://raw.githubusercontent.com/varunpsingh74358/Server-Agent/main/install-cloudorc.ps1 | iex
+   ```
+
+   or the manual download+run form - see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+   This step is now fully independent of your backend - it just gets a working,
+   self-contained agent installed and running as a service.
+
+2. **Point each installed agent at your real backend** - edit
+   `C:\Program Files\CloudOrc\Agents\ControlAgent\appsettings.json` on that server:
+
+   ```json
+   {
+     "BackendConnection": {
+       "Enabled": true,
+       "Url": "wss://your-real-backend-domain/agent",
+       "DevelopmentAllowInsecureWs": false
+     },
+     "AgentIdentity": {
+       "AgentId": "a-unique-id-for-this-specific-server",
+       "ServerId": "your-backend-or-fleet-identifier"
+     }
+   }
+   ```
+
+   then `Restart-Service CloudOrcControlAgent`. Use `wss://` (real TLS) for anything
+   beyond your own local testing - `ws://` is refused at startup unless
+   `DevelopmentAllowInsecureWs` is explicitly `true`, which should never be set on a
+   real deployment.
+
+3. **Give every server a distinct `AgentId`.** Your backend needs some way to tell which
+   physical/virtual machine a given WebSocket connection and its `HELLO`/`COMMAND_RESULT`
+   messages belong to - `AgentId` (plus the real `machineId`/`machineName` already inside
+   `HELLO`) is what your backend should key its per-server state on.
+
+4. **There is still no authentication.** `AgentId`/`ServerId` are plain, trusted
+   configuration values with no credential behind them - anyone who can reach your
+   backend's WebSocket endpoint and send a valid `HELLO` looks legitimate to the agent
+   side today. Do **not** expose that endpoint on the open internet without at least a
+   network-level control (VPN, IP allowlist, a reverse proxy requiring auth in front of
+   it) until real enrollment/credentials are built - see
+   [docs/FUTURE_BACKEND_INTEGRATION.md](docs/FUTURE_BACKEND_INTEGRATION.md) for exactly
+   what a real credential/enrollment mechanism needs to add, and where it plugs in
+   (additively - none of the agent's execution/queue code needs to change for it).
+
+5. **Rolling out to many servers**: repeat step 1 (the one-liner) on each one, each with
+   its own `AgentId` in step 2. The installer is idempotent - re-running it on an
+   already-installed server upgrades in place without duplicating services (§3.9).
