@@ -140,9 +140,45 @@ try {
         Fail "No checksum file was available to verify the download against. Pass -AllowUnverified to proceed anyway (not recommended), or use a release that publishes $checksumName."
     }
 
-    Write-Host "`nLaunching installer elevated: $assetName $InstallArgs"
+    $isElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    Write-Host "`nLaunching installer $(if ($isElevated) { '(already elevated - launching directly)' } else { '(requesting UAC elevation)' }): $assetName $InstallArgs"
+
     # Start-Process on a native .exe - never Invoke-Expression on downloaded content.
-    $process = Start-Process -FilePath $exePath -ArgumentList $InstallArgs -Verb RunAs -Wait -PassThru
+    $startParams = @{ FilePath = $exePath; ArgumentList = $InstallArgs; PassThru = $true }
+    if (-not $isElevated) {
+        # Only request UAC elevation when this session is not already elevated.
+        # Requesting -Verb RunAs from an ALREADY-elevated session is a confirmed source
+        # of Start-Process hanging indefinitely - the elevation broker's process handle
+        # is not always tracked reliably in that "elevated re-elevating" case (seen live
+        # over an RDP session: the installer fully completed - files deployed, no
+        # process left running, services created - while the wait below never returned).
+        $startParams['Verb'] = 'RunAs'
+    }
+    $process = Start-Process @startParams
+
+    # Poll instead of a bare `-Wait`, so a stuck wait (see above) is visible and
+    # diagnosable instead of silently hanging forever with no output.
+    $maxWaitSeconds = 900
+    $waited = 0
+    while (-not $process.HasExited -and $waited -lt $maxWaitSeconds) {
+        Start-Sleep -Seconds 5
+        $waited += 5
+        if ($waited % 30 -eq 0) {
+            Write-Host "Still installing... (${waited}s elapsed)"
+        }
+    }
+
+    if (-not $process.HasExited) {
+        Write-Host "`nWARNING: no completion signal after ${maxWaitSeconds}s. This can happen even after a" -ForegroundColor Yellow
+        Write-Host "successful install due to a known Windows process-tracking limitation when" -ForegroundColor Yellow
+        Write-Host "elevating from an already-elevated session. Check manually:" -ForegroundColor Yellow
+        Write-Host "  sc.exe query CloudOrcControlAgent" -ForegroundColor Yellow
+        Write-Host "  sc.exe query CloudOrcWatchdogAgent" -ForegroundColor Yellow
+        Write-Host "If both show RUNNING, installation succeeded - this window can be closed safely." -ForegroundColor Yellow
+        exit 0
+    }
+
     $exitCode = $process.ExitCode
 
     if ($exitCode -eq 0) {
