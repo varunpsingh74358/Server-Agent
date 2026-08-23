@@ -1,0 +1,98 @@
+name: Build and Release CloudOrc Windows Agents
+
+# CI validation runs on every push to main (build + test + package, no GitHub Release).
+# A GitHub Release with the signed-checksum ZIP asset is only created when a `v*` tag is
+# pushed - ordinary commits to main never produce a public/private release artifact.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+# Minimum permission needed: `contents: write` only, so the release job can create a
+# GitHub Release and upload assets using the built-in GITHUB_TOKEN. No other scopes, and
+# no personal access token, are required for normal operation.
+permissions:
+  contents: write
+
+jobs:
+  build-test-package:
+    name: Build, test, and package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Target framework across every project in this solution is net10.0-windows.
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: dotnet restore
+        run: dotnet restore CloudOrc.WindowsAgents.sln
+
+      - name: dotnet build (Release)
+        run: dotnet build CloudOrc.WindowsAgents.sln -c Release --no-restore
+
+      - name: dotnet test
+        run: dotnet test CloudOrc.WindowsAgents.sln -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Package release (publish + zip + checksum)
+        shell: pwsh
+        # Tests already ran as their own step above - skip re-running them inside the
+        # packaging script.
+        run: ./scripts/package-agent.ps1 -SkipTests
+
+      - name: Verify package output
+        shell: pwsh
+        run: |
+          $zip = "dist/CloudOrcAgents-win-x64.zip"
+          $sha = "dist/CloudOrcAgents-win-x64.sha256"
+          if (-not (Test-Path $zip)) { throw "Missing $zip" }
+          if (-not (Test-Path $sha)) { throw "Missing $sha" }
+          if ((Get-Item $zip).Length -le 0) { throw "$zip is empty" }
+          Write-Host "Package verified: $zip ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB)"
+
+      # Uploaded on every run (including plain pushes to main) purely as a downloadable
+      # CI artifact for inspection/testing - this is NOT a GitHub Release.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudOrcAgents-win-x64
+          path: |
+            dist/CloudOrcAgents-win-x64.zip
+            dist/CloudOrcAgents-win-x64.sha256
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build-test-package
+    runs-on: windows-latest
+    # Only ever runs for a version tag push - never for a plain push to main or a PR.
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CloudOrcAgents-win-x64
+          path: dist
+
+      - name: Create GitHub Release and upload assets
+        shell: pwsh
+        # Uses the GitHub CLI (preinstalled on GitHub-hosted Windows runners) with the
+        # built-in GITHUB_TOKEN - no personal access token is used or required.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release create $tag `
+            "dist/CloudOrcAgents-win-x64.zip" `
+            "dist/CloudOrcAgents-win-x64.sha256" `
+            --repo "${{ github.repository }}" `
+            --title "CloudOrcAgent $tag" `
+            --generate-notes

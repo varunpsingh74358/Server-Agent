@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CloudOrc.AgentTestServer</RootNamespace>
+    <!--
+      This is a DEVELOPMENT/TESTING-ONLY tool used to exercise the Control Agent's
+      backend WebSocket connection before wiring it up to the real CloudOrc backend.
+      It is not part of, and must never be shipped alongside, the production agent.
+    -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CloudOrc.Agent.Contracts\CloudOrc.Agent.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>
