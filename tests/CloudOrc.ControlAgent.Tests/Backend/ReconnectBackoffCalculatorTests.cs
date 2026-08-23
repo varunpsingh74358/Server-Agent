@@ -71,4 +71,28 @@ public class ReconnectBackoffCalculatorTests
 
         Assert.True(delay > TimeSpan.Zero);
     }
+
+    [Fact]
+    public void NextDelay_JitterDisabledByDefault_ReturnsExactDeterministicDelay()
+    {
+        // ReconnectJitterMaxMilliseconds defaults to 0 - every test above relies on this
+        // for exact-value assertions, so this pins the default explicitly.
+        var options = MakeOptions(initial: 2);
+        Assert.Equal(0, options.ReconnectJitterMaxMilliseconds);
+    }
+
+    [Fact]
+    public void NextDelay_WithJitterConfigured_AddsUpToTheConfiguredMaximum()
+    {
+        var options = MakeOptions(initial: 2, max: 1000);
+        options.ReconnectJitterMaxMilliseconds = 500;
+        var calculator = new ReconnectBackoffCalculator(options);
+
+        for (var i = 0; i < 20; i++)
+        {
+            var delay = calculator.NextDelay();
+            Assert.InRange(delay, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2) + TimeSpan.FromMilliseconds(500));
+            calculator.Reset();
+        }
+    }
 }

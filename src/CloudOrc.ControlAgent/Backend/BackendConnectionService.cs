@@ -96,7 +96,21 @@ public sealed class BackendConnectionService(
         using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
         {
             connectCts.CancelAfter(TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds));
-            await socket.ConnectAsync(new Uri(_options.Url), connectCts.Token).ConfigureAwait(false);
+            try
+            {
+                await socket.ConnectAsync(new Uri(_options.Url), connectCts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            {
+                // Distinguish "our own connect timeout fired" from "app is shutting down"
+                // (both surface as OperationCanceledException) before classifying, so a
+                // hung/unreachable backend gets a specific, actionable diagnostic instead
+                // of a bare TaskCanceledException stack trace.
+                var wasConnectTimeout = connectCts.IsCancellationRequested;
+                var reason = ConnectionFailureClassifier.Classify(ex, wasConnectTimeout);
+                logger.LogWarning("Could not connect to backend at {Url}: {Reason}", _options.Url, reason);
+                throw;
+            }
         }
 
         logger.LogInformation("Connected to backend at {Url}.", _options.Url);

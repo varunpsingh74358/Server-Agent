@@ -33,6 +33,15 @@ public sealed class BackendConnectionOptions
 
     public int ReconnectMaximumDelaySeconds { get; set; } = 60;
 
+    /// <summary>
+    /// Optional random jitter (0 to this many milliseconds, added on top of the
+    /// calculated exponential delay) to avoid many agents reconnecting in lockstep after
+    /// a shared backend outage. Defaults to 0 (no jitter, exact deterministic delays) to
+    /// preserve the precise, documented backoff behavior this project already relies on
+    /// for local testing; set this above 0 for a large production fleet.
+    /// </summary>
+    public int ReconnectJitterMaxMilliseconds { get; set; }
+
     public int HeartbeatIntervalSeconds { get; set; } = 15;
 
     public int TelemetryIntervalSeconds { get; set; } = 10;

@@ -24,7 +24,16 @@ public sealed class ReconnectBackoffCalculator(BackendConnectionOptions options)
         _consecutiveFailures++;
         var seconds = options.ReconnectInitialDelaySeconds * Math.Pow(2, _consecutiveFailures - 1);
         seconds = Math.Min(seconds, options.ReconnectMaximumDelaySeconds);
-        return TimeSpan.FromSeconds(seconds);
+        var delay = TimeSpan.FromSeconds(seconds);
+
+        // Additive jitter, off by default (ReconnectJitterMaxMilliseconds = 0) so every
+        // existing exact-value test/behavior is unaffected unless an operator opts in.
+        if (options.ReconnectJitterMaxMilliseconds > 0)
+        {
+            delay += TimeSpan.FromMilliseconds(Random.Shared.Next(0, options.ReconnectJitterMaxMilliseconds));
+        }
+
+        return delay;
     }
 
     public void Reset() => _consecutiveFailures = 0;
