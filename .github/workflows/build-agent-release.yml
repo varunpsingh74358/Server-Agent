@@ -86,13 +86,36 @@ jobs:
         shell: pwsh
         # Uses the GitHub CLI (preinstalled on GitHub-hosted Windows runners) with the
         # built-in GITHUB_TOKEN - no personal access token is used or required.
+        #
+        # This workflow and build-installer.yml both trigger on the same `v*` tag and
+        # both publish to the same release (one with the ZIP+checksum, the other with
+        # the installer EXE+checksum) - whichever job finishes first must CREATE the
+        # release, and the other must only UPLOAD its assets to the now-existing one, or
+        # the second `gh release create` fails with HTTP 422 "tag_name already exists".
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.ref_name }}"
-          gh release create $tag `
-            "dist/CloudOrcAgents-win-x64.zip" `
-            "dist/CloudOrcAgents-win-x64.sha256" `
-            --repo "${{ github.repository }}" `
-            --title "CloudOrcAgent $tag" `
-            --generate-notes
+          $assets = @("dist/CloudOrcAgents-win-x64.zip", "dist/CloudOrcAgents-win-x64.sha256")
+
+          gh release view $tag --repo "${{ github.repository }}" 2>$null
+          $alreadyExists = ($LASTEXITCODE -eq 0)
+
+          if (-not $alreadyExists) {
+            gh release create $tag @assets `
+              --repo "${{ github.repository }}" `
+              --title "CloudOrc Agent $tag" `
+              --generate-notes
+            $alreadyExists = ($LASTEXITCODE -ne 0)
+            # A non-zero exit here almost always means the other workflow won a narrow
+            # race and created the release a moment after our `gh release view` check -
+            # fall back to upload rather than failing the whole run.
+            if ($alreadyExists) {
+              Write-Host "gh release create failed (likely lost a race with the other workflow) - falling back to upload."
+            }
+          }
+
+          if ($alreadyExists) {
+            gh release upload $tag @assets --repo "${{ github.repository }}" --clobber
+          }
+          if ($LASTEXITCODE -ne 0) { throw "gh release step failed with exit code $LASTEXITCODE" }
