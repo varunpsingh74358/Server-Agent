@@ -19,4 +19,11 @@ public sealed class PowerShellExecutionOutcome
     public IReadOnlyList<string> Output { get; init; } = [];
 
     public string? Error { get; init; }
+
+    /// <summary>
+    /// The process exit code the script requested via <c>exit &lt;n&gt;</c>, captured
+    /// through a custom PSHost. Null if the script never called <c>exit</c> - there is no
+    /// process exit code to report in that case.
+    /// </summary>
+    public int? ExitCode { get; init; }
 }

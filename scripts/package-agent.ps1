@@ -34,20 +34,31 @@
     earlier step - this flag avoids running them twice in CI). Local ad-hoc runs of this
     script should leave tests enabled.
 
+.PARAMETER Version
+    Overrides the <Version> MSBuild property (normally "0.0.0-dev" from the repo root's
+    Directory.Build.props) for both published agents via `dotnet publish -p:Version=...`.
+    This is the ONE place that should ever set a real release version on the .NET
+    binaries - pass the exact same string used for the installer's /DMyAppVersion= so the
+    exe's own FileVersion/ProductVersion, the installer's AppVersion, and the published
+    artifact all agree (see docs/INSTALLATION.md). Left empty (the default), the published
+    binaries keep Directory.Build.props' placeholder version - correct for local/dev runs.
+
 .EXAMPLE
     .\scripts\package-agent.ps1
     Full local build: restore, build, test, publish both agents, zip, checksum.
 
 .EXAMPLE
-    .\scripts\package-agent.ps1 -SkipTests
-    Used by CI after tests already ran as a separate workflow step.
+    .\scripts\package-agent.ps1 -SkipTests -Version 1.1.0
+    Used by CI after tests already ran as a separate workflow step, for a real release
+    build - the resulting exes report FileVersion/ProductVersion 1.1.0.
 #>
 
 [CmdletBinding()]
 param(
     [string]$Configuration = "Release",
     [string]$OutputRoot = "dist",
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -162,12 +173,21 @@ $watchdogAgentOut = Join-Path $packageRoot "WatchdogAgent"
 New-Item -ItemType Directory -Force -Path $controlAgentOut | Out-Null
 New-Item -ItemType Directory -Force -Path $watchdogAgentOut | Out-Null
 
+# -p:Version=... (only passed when -Version was supplied) is the single override point for
+# the version baked into both exes' FileVersion/ProductVersion - see the -Version parameter
+# doc comment above. Without it, Directory.Build.props' placeholder version applies as-is.
+$versionArgs = @()
+if ($Version) {
+    Write-Host "  Overriding <Version> for this build: $Version"
+    $versionArgs = @("-p:Version=$Version")
+}
+
 Step "dotnet publish Control Agent (win-x64, self-contained)"
-& dotnet publish "$controlAgentProject" -c $Configuration -r win-x64 --self-contained true -p:PublishSingleFile=false -o "$controlAgentOut"
+& dotnet publish "$controlAgentProject" -c $Configuration -r win-x64 --self-contained true -p:PublishSingleFile=false @versionArgs -o "$controlAgentOut"
 if ($LASTEXITCODE -ne 0) { Fail "Publishing Control Agent failed (exit code $LASTEXITCODE)." }
 
 Step "dotnet publish Watchdog Agent (win-x64, self-contained)"
-& dotnet publish "$watchdogAgentProject" -c $Configuration -r win-x64 --self-contained true -p:PublishSingleFile=false -o "$watchdogAgentOut"
+& dotnet publish "$watchdogAgentProject" -c $Configuration -r win-x64 --self-contained true -p:PublishSingleFile=false @versionArgs -o "$watchdogAgentOut"
 if ($LASTEXITCODE -ne 0) { Fail "Publishing Watchdog Agent failed (exit code $LASTEXITCODE)." }
 
 # ----------------------------------------------------------------------------

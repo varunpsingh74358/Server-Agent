@@ -1,7 +1,6 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using CloudOrc.Agent.Contracts.Commands;
 using CloudOrc.Agent.Contracts.Protocol;
 
 namespace CloudOrc.AgentTestServer;
@@ -40,12 +39,14 @@ public sealed class AgentSession
     {
         var message = new CommandMessage
         {
-            Command = new CommandRequest
+            CommandId = commandId,
+            CorrelationId = $"corr-{Guid.NewGuid():N}"[..17],
+            CommandType = "powershell-exec",
+            CreatedAt = DateTimeOffset.UtcNow,
+            Parameters = new CommandParameters
             {
-                CommandId = commandId,
                 Script = script,
-                TimeoutSeconds = timeoutSeconds,
-                CreatedAt = DateTimeOffset.UtcNow
+                TimeoutSeconds = timeoutSeconds
             }
         };
 

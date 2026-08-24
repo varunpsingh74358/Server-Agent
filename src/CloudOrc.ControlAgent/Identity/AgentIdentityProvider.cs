@@ -1,4 +1,5 @@
 using CloudOrc.Agent.Contracts.Identity;
+using CloudOrc.Agent.Contracts.Versioning;
 using CloudOrc.ControlAgent.Configuration;
 using CloudOrc.ControlAgent.Enrollment;
 using Microsoft.Extensions.Logging;
@@ -38,7 +39,7 @@ public sealed class AgentIdentityProvider
     {
         var enrolled = _enrolledStateStore.TryLoad();
         var machineId = MachineIdResolver.Resolve(_controlAgentOptions.DataDirectory, _logger);
-        var agentVersion = typeof(AgentIdentityProvider).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        var agentVersion = AgentVersionInfo.GetVersion(typeof(AgentIdentityProvider).Assembly);
 
         if (enrolled is not null)
         {

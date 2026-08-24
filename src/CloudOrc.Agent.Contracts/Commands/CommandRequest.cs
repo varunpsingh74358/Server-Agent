@@ -13,6 +13,12 @@ public sealed class CommandRequest
     [JsonPropertyName("commandId")]
     public string CommandId { get; init; } = string.Empty;
 
+    [JsonPropertyName("correlationId")]
+    public string? CorrelationId { get; init; }
+
+    [JsonPropertyName("commandType")]
+    public string CommandType { get; init; } = "powershell-exec";
+
     [JsonPropertyName("script")]
     public string Script { get; init; } = string.Empty;
 

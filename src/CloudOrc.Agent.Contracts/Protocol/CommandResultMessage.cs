@@ -16,6 +16,9 @@ public sealed class CommandResultMessage
     [JsonPropertyName("commandId")]
     public required string CommandId { get; init; }
 
+    [JsonPropertyName("correlationId")]
+    public string? CorrelationId { get; init; }
+
     [JsonPropertyName("status")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required CommandStatus Status { get; init; }
@@ -35,14 +38,19 @@ public sealed class CommandResultMessage
     [JsonPropertyName("error")]
     public string? Error { get; init; }
 
+    [JsonPropertyName("exitCode")]
+    public int? ExitCode { get; init; }
+
     public static CommandResultMessage FromCommandResult(CommandResult result) => new()
     {
         CommandId = result.CommandId,
+        CorrelationId = result.CorrelationId,
         Status = result.Status,
         StartedAt = result.StartedAt,
         CompletedAt = result.CompletedAt,
         DurationMilliseconds = result.DurationMilliseconds,
         Output = result.Output,
-        Error = result.Error
+        Error = result.Error,
+        ExitCode = result.ExitCode
     };
 }

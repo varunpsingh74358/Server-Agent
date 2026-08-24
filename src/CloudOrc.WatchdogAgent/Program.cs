@@ -1,8 +1,20 @@
+using CloudOrc.Agent.Contracts.Versioning;
 using CloudOrc.WatchdogAgent.Configuration;
 using CloudOrc.WatchdogAgent.ControlAgentManagement;
 using CloudOrc.WatchdogAgent.Recovery;
 using CloudOrc.WatchdogAgent.Services;
 using Serilog;
+
+// Same "--version"/"-v" convention as CloudOrc.ControlAgent.exe (see its Program.cs) - kept
+// consistent so any script/operator that checks the Control Agent's version can check the
+// Watchdog's the same way. Not itself required by the installer, which only shells out to
+// the Control Agent's CLI.
+if (args.Length > 0 && (string.Equals(args[0], "--version", StringComparison.OrdinalIgnoreCase) || string.Equals(args[0], "-v", StringComparison.OrdinalIgnoreCase)))
+{
+    Console.WriteLine("CloudOrc WatchdogAgent");
+    Console.WriteLine($"Version: {AgentVersionInfo.GetVersion()}");
+    return 0;
+}
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -57,3 +69,5 @@ finally
 {
     Log.CloseAndFlush();
 }
+
+return 0;

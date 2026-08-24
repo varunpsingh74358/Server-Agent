@@ -55,10 +55,11 @@ public sealed class CommandProcessingService(
     private async Task ProcessOneAsync(CommandJob job, CancellationToken stoppingToken)
     {
         var commandId = job.Request.CommandId;
+        var correlationId = job.Request.CorrelationId;
         health.SetCurrentCommand(commandId, CommandStatus.Running);
         health.TouchProcessing();
 
-        await PublishStatusAsync(commandId, CommandStatus.Running, stoppingToken).ConfigureAwait(false);
+        await PublishStatusAsync(commandId, correlationId, CommandStatus.Running, stoppingToken).ConfigureAwait(false);
 
         logger.LogInformation(
             "Executing command {CommandId} (timeout {TimeoutSeconds}s).",
@@ -74,12 +75,14 @@ public sealed class CommandProcessingService(
             result = new CommandResult
             {
                 CommandId = commandId,
+                CorrelationId = correlationId,
                 Status = outcome.Status,
                 StartedAt = outcome.StartedAt,
                 CompletedAt = outcome.CompletedAt,
                 DurationMilliseconds = outcome.DurationMilliseconds,
                 Output = outcome.Output,
-                Error = outcome.Error
+                Error = outcome.Error,
+                ExitCode = outcome.ExitCode
             };
         }
         catch (Exception ex)
@@ -91,6 +94,7 @@ public sealed class CommandProcessingService(
             result = new CommandResult
             {
                 CommandId = commandId,
+                CorrelationId = correlationId,
                 Status = CommandStatus.Failed,
                 StartedAt = now,
                 CompletedAt = now,
@@ -127,11 +131,11 @@ public sealed class CommandProcessingService(
             result.Error is null ? string.Empty : $" Error: {result.Error}");
     }
 
-    private async Task PublishStatusAsync(string commandId, CommandStatus status, CancellationToken stoppingToken)
+    private async Task PublishStatusAsync(string commandId, string? correlationId, CommandStatus status, CancellationToken stoppingToken)
     {
         try
         {
-            await statusPublisher.PublishStatusAsync(commandId, status, stoppingToken).ConfigureAwait(false);
+            await statusPublisher.PublishStatusAsync(commandId, correlationId, status, stoppingToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

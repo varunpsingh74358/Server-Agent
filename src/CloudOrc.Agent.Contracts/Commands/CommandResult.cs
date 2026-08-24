@@ -11,6 +11,9 @@ public sealed class CommandResult
     [JsonPropertyName("commandId")]
     public required string CommandId { get; init; }
 
+    [JsonPropertyName("correlationId")]
+    public string? CorrelationId { get; init; }
+
     [JsonPropertyName("status")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required CommandStatus Status { get; init; }
@@ -29,4 +32,7 @@ public sealed class CommandResult
 
     [JsonPropertyName("error")]
     public string? Error { get; init; }
+
+    [JsonPropertyName("exitCode")]
+    public int? ExitCode { get; init; }
 }

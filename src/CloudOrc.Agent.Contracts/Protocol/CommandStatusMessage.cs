@@ -12,6 +12,9 @@ public sealed class CommandStatusMessage
     [JsonPropertyName("commandId")]
     public required string CommandId { get; init; }
 
+    [JsonPropertyName("correlationId")]
+    public string? CorrelationId { get; init; }
+
     [JsonPropertyName("status")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public required CommandStatus Status { get; init; }

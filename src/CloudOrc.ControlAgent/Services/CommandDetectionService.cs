@@ -47,7 +47,7 @@ public sealed class CommandDetectionService(
                     job.Request.CommandId, source.GetType().Name);
 
                 await commandQueue.EnqueueAsync(job, stoppingToken).ConfigureAwait(false);
-                await PublishQueuedStatusAsync(job.Request.CommandId, stoppingToken).ConfigureAwait(false);
+                await PublishQueuedStatusAsync(job.Request.CommandId, job.Request.CorrelationId, stoppingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -56,11 +56,11 @@ public sealed class CommandDetectionService(
         }
     }
 
-    private async Task PublishQueuedStatusAsync(string commandId, CancellationToken stoppingToken)
+    private async Task PublishQueuedStatusAsync(string commandId, string? correlationId, CancellationToken stoppingToken)
     {
         try
         {
-            await statusPublisher.PublishStatusAsync(commandId, CommandStatus.Queued, stoppingToken).ConfigureAwait(false);
+            await statusPublisher.PublishStatusAsync(commandId, correlationId, CommandStatus.Queued, stoppingToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

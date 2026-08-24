@@ -233,20 +233,53 @@ public sealed class BackendConnectionService(
         }
     }
 
+    private const string PowerShellExecCommandType = "powershell-exec";
+
     private void HandleCommandMessage(string json)
     {
         var message = JsonSerializer.Deserialize<CommandMessage>(json, ProtocolJson.Options);
-        if (message?.Command is null)
+        if (message?.Parameters is null)
         {
-            logger.LogWarning("Received a COMMAND message with no command payload; ignoring it.");
+            logger.LogWarning("Received a COMMAND message with no parameters payload; ignoring it.");
             return;
         }
 
-        if (!commandSource.TryAcceptIncomingCommand(message.Command, out var rejectionReason))
+        if (!string.Equals(message.CommandType, PowerShellExecCommandType, StringComparison.Ordinal))
         {
-            logger.LogWarning("Rejected incoming command {CommandId}: {Reason}", message.Command.CommandId, rejectionReason);
+            logger.LogWarning(
+                "Rejected incoming command {CommandId}: unsupported commandType '{CommandType}'.",
+                message.CommandId, message.CommandType);
 
-            var error = new ErrorMessage { Message = rejectionReason ?? "Command rejected.", RelatedCommandId = message.Command.CommandId };
+            var typeError = new ErrorMessage
+            {
+                Message = $"Unsupported commandType '{message.CommandType}'. Only '{PowerShellExecCommandType}' is supported.",
+                RelatedCommandId = message.CommandId,
+                CorrelationId = message.CorrelationId
+            };
+            outgoing.TryEnqueue(JsonSerializer.Serialize(typeError, ProtocolJson.Options));
+            return;
+        }
+
+        var request = new CommandRequest
+        {
+            CommandId = message.CommandId,
+            CorrelationId = message.CorrelationId,
+            CommandType = message.CommandType,
+            Script = message.Parameters.Script,
+            TimeoutSeconds = message.Parameters.TimeoutSeconds,
+            CreatedAt = message.CreatedAt
+        };
+
+        if (!commandSource.TryAcceptIncomingCommand(request, out var rejectionReason))
+        {
+            logger.LogWarning("Rejected incoming command {CommandId}: {Reason}", request.CommandId, rejectionReason);
+
+            var error = new ErrorMessage
+            {
+                Message = rejectionReason ?? "Command rejected.",
+                RelatedCommandId = request.CommandId,
+                CorrelationId = request.CorrelationId
+            };
             outgoing.TryEnqueue(JsonSerializer.Serialize(error, ProtocolJson.Options));
         }
     }

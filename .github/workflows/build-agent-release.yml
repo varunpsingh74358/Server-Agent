@@ -39,11 +39,28 @@ jobs:
       - name: dotnet test
         run: dotnet test CloudOrc.WindowsAgents.sln -c Release --no-build --logger "console;verbosity=normal"
 
+      # Same version-from-tag parsing as build-installer.yml's "Determine installer
+      # version" step, so the plain-ZIP distribution path's binaries report the identical
+      # version as the installer-built ones for the same tag - one source of truth, not
+      # two independently-computed ones.
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.ref_type }}" -eq "tag" -and $tag -match '^v(\d+\.\d+\.\d+)$') {
+            $version = $Matches[1]
+          } else {
+            $version = "0.0.0-dev"
+          }
+          Write-Host "Release version: $version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Package release (publish + zip + checksum)
         shell: pwsh
         # Tests already ran as their own step above - skip re-running them inside the
         # packaging script.
-        run: ./scripts/package-agent.ps1 -SkipTests
+        run: ./scripts/package-agent.ps1 -SkipTests -Version "${{ steps.version.outputs.version }}"
 
       - name: Verify package output
         shell: pwsh

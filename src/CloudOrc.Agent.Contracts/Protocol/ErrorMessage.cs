@@ -14,6 +14,9 @@ public sealed class ErrorMessage
     [JsonPropertyName("relatedCommandId")]
     public string? RelatedCommandId { get; init; }
 
+    [JsonPropertyName("correlationId")]
+    public string? CorrelationId { get; init; }
+
     [JsonPropertyName("timestamp")]
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
 }

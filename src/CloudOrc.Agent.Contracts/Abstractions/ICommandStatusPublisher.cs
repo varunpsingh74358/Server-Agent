@@ -10,5 +10,5 @@ namespace CloudOrc.Agent.Contracts.Abstractions;
 /// </summary>
 public interface ICommandStatusPublisher
 {
-    Task PublishStatusAsync(string commandId, CommandStatus status, CancellationToken cancellationToken);
+    Task PublishStatusAsync(string commandId, string? correlationId, CommandStatus status, CancellationToken cancellationToken);
 }

@@ -1,4 +1,5 @@
 using CloudOrc.Agent.Contracts.Abstractions;
+using CloudOrc.Agent.Contracts.Versioning;
 using CloudOrc.ControlAgent.Backend;
 using CloudOrc.ControlAgent.Configuration;
 using CloudOrc.ControlAgent.Enrollment;
@@ -11,6 +12,17 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Serilog;
+
+// `--version`/`-v` is checked first, before anything else (including `enroll`) is parsed -
+// it must work even with no appsettings.json present and never touches any state. This is
+// what the installer's own --version handling, and any operator/script checking "what did
+// the upgrade actually install", relies on. See docs/INSTALLATION.md.
+if (args.Length > 0 && (string.Equals(args[0], "--version", StringComparison.OrdinalIgnoreCase) || string.Equals(args[0], "-v", StringComparison.OrdinalIgnoreCase)))
+{
+    Console.WriteLine("CloudOrc ControlAgent");
+    Console.WriteLine($"Version: {AgentVersionInfo.GetVersion()}");
+    return 0;
+}
 
 // `enroll` is a one-shot CLI mode (used by the installer, or manually for re-enrollment)
 // that runs BEFORE the normal Worker Service host is built - it never starts the host,

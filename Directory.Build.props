@@ -1,0 +1,31 @@
+<Project>
+
+  <!--
+    Single source of truth for the version reported by every CloudOrc agent binary,
+    the Windows Services they run as, and (via scripts/package-agent.ps1's -Version
+    parameter and the CI workflows) the installer and published artifacts. Applies
+    automatically to every project in the solution (MSBuild picks up the nearest
+    Directory.Build.props up the tree) - no project needs its own <Version>.
+
+    Local/dev builds use the "0.0.0-dev" placeholder below unchanged. A real build
+    overrides it at build time with `-p:Version=X.Y.Z` (see scripts/package-agent.ps1)
+    rather than editing this file per release - the exact same X.Y.Z string a CI run
+    parses from the pushed tag is what reaches both the .NET assemblies and, via
+    /DMyAppVersion=X.Y.Z, the Inno Setup installer's own AppVersion.
+  -->
+  <PropertyGroup>
+    <Version>0.0.0-dev</Version>
+
+    <!--
+      The .NET SDK appends "+<git-commit-sha>" to InformationalVersion by default
+      whenever the project is inside a git repository. That would make
+      ProductVersion/InformationalVersion (what the version command prints, and what
+      `(Get-Item ...).VersionInfo.ProductVersion` shows) something like
+      "1.1.0+202baf0..." instead of the plain "1.1.0" this project's version
+      commands and docs are specified to print. Disabling it keeps the version
+      string exactly what was passed to -p:Version.
+    -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+</Project>

@@ -140,15 +140,30 @@ Invoke-RestMethod -Uri "http://localhost:5299/send" -Method Post -ContentType "a
 Both produce the same message flow in Terminal 1:
 
 ```
-[COMMAND_STATUS] {"type":"COMMAND_STATUS","commandId":"test-...","status":"Queued",...}
-[COMMAND_STATUS] {"type":"COMMAND_STATUS","commandId":"test-...","status":"Running",...}
-[COMMAND_RESULT] {"type":"COMMAND_RESULT","commandId":"test-...","status":"Success","output":["<date>"],"error":null,...}
+[COMMAND_STATUS] {"type":"COMMAND_STATUS","commandId":"test-...","correlationId":"corr-...","status":"Queued",...}
+[COMMAND_STATUS] {"type":"COMMAND_STATUS","commandId":"test-...","correlationId":"corr-...","status":"Running",...}
+[COMMAND_RESULT] {"type":"COMMAND_RESULT","commandId":"test-...","correlationId":"corr-...","status":"Success","output":["<date>"],"error":null,"exitCode":null,...}
 ```
+
+The `send` console command generates and sends its own `correlationId` alongside `commandId`, mirroring what a real backend is expected to do. The COMMAND envelope it sends looks like:
+
+```json
+{
+  "type": "COMMAND",
+  "commandId": "test-...",
+  "correlationId": "corr-...",
+  "commandType": "powershell-exec",
+  "createdAt": "...",
+  "parameters": { "script": "Get-Date", "timeoutSeconds": 30 }
+}
+```
+
+`exitCode` is populated only when the script explicitly calls `exit <n>` - PowerShell has no implicit process exit code otherwise, so it stays `null`.
 
 **Failed command** - send `Get-Service -Name "DefinitelyDoesNotExist"`:
 
 ```
-[COMMAND_RESULT] {..."status":"Failed",...,"error":"Cannot find any service with service name 'DefinitelyDoesNotExist'."}
+[COMMAND_RESULT] {..."status":"Failed",...,"error":"Cannot find any service with service name 'DefinitelyDoesNotExist'.","exitCode":null}
 ```
 
 **Timeout** - `send --timeout 3 Start-Sleep -Seconds 30`:

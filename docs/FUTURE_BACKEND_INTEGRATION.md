@@ -68,7 +68,12 @@ real backend instead of the local test server:
 4. **The real backend must speak the same protocol** - `HelloMessage`, `CommandMessage`,
    `CommandResultMessage`, etc. in `CloudOrc.Agent.Contracts.Protocol` - or a translation
    layer needs to sit in front of it. This is the one piece of actual coordination work
-   with the backend team/codebase.
+   with the backend team/codebase. `CommandMessage` carries `commandId`, `correlationId`,
+   `commandType` (currently always `"powershell-exec"` - the one executor implemented
+   today; any other value is rejected with an `ERROR` message), and `parameters.script`/
+   `parameters.timeoutSeconds`; `CommandResultMessage`/`CommandStatusMessage` echo the same
+   `correlationId` back, and `CommandResultMessage` also carries an optional `exitCode`
+   (populated only when the script explicitly calls `exit <n>`).
 
 Nothing about `WssCommandSource`/`WssResultSink`/`BackendConnectionService` themselves
 needs to change for this - they already implement the full protocol against a real

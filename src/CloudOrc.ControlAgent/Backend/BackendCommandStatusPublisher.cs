@@ -16,9 +16,9 @@ public sealed class BackendCommandStatusPublisher(
     OutgoingMessageChannel outgoing,
     ILogger<BackendCommandStatusPublisher> logger) : ICommandStatusPublisher
 {
-    public Task PublishStatusAsync(string commandId, CommandStatus status, CancellationToken cancellationToken)
+    public Task PublishStatusAsync(string commandId, string? correlationId, CommandStatus status, CancellationToken cancellationToken)
     {
-        var message = new CommandStatusMessage { CommandId = commandId, Status = status };
+        var message = new CommandStatusMessage { CommandId = commandId, CorrelationId = correlationId, Status = status };
         var json = JsonSerializer.Serialize(message, ProtocolJson.Options);
 
         if (!outgoing.TryEnqueue(json))

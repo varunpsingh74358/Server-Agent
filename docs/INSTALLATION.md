@@ -209,17 +209,71 @@ supported, permanently.
 Run the same installer (any distribution method above) again, pointing at a newer
 version. The installer:
 
-- Detects the existing installation via a fixed product ID.
+- Detects the existing installation by checking for an already-deployed
+  `CloudOrc.ControlAgent.exe` at the fixed install path (see [§J](#j-service-names-install-directories-data-directories)).
+  The install path can never vary between versions - `DisableDirPage=yes` means even an
+  interactive, non-silent run cannot browse to a different folder.
+- Compares the installed exe's file version against the new installer's version (see
+  [§G.1 Downgrade protection](#g1-downgrade-protection) below) **before** touching
+  anything - a blocked downgrade stops here with nothing changed.
 - Stops both services before overwriting files (so binaries are never locked).
 - Preserves each agent's existing `appsettings.json` / `appsettings.Development.json`
   (a literal file-level preserve, not a smart merge - a config field added in a newer
   default `appsettings.json` will not automatically appear in an already-customized file).
+- **Never touches `C:\ProgramData\CloudOrc\`** - so `enrollment.dat` (the DPAPI-encrypted
+  `AgentId`/`ServerId`/credential - see [ENROLLMENT.md](ENROLLMENT.md)) survives an upgrade
+  automatically, the same way it survives an uninstall. No `--token` is needed, or accepted
+  as meaningfully different, on an upgrade - omitting it (the normal case) leaves the
+  existing enrollment exactly as it was; the agent reconnects to the same backend with the
+  same identity once the updated service starts.
 - Reconfigures (never duplicates) the two Windows Services.
 - Restarts both services and verifies they reach `Running`.
 
 Confirmed live during development: re-running the installer after customizing
 `AgentId` left the customized value intact, and `sc.exe query` afterward showed exactly
-one instance of each service - no duplicates.
+one instance of each service - no duplicates. Confirmed live again for this version's
+enrollment-preserving upgrade path: see `STATUS_REPORT.md` for the full 1.0.0 -> 1.1.0
+upgrade test (same `AgentId`/`ServerId`, no re-enrollment, service running, telemetry and
+command execution continuing throughout).
+
+### G.1 Downgrade protection
+
+If the currently-installed Control Agent's file version is **newer** than the installer
+being run, the installer refuses to proceed (exit code `30`, message printed unless
+`/VERYSILENT`/`/SILENT`) rather than silently overwriting a newer install with older
+binaries. Nothing is touched when this happens - no service is stopped, no file is
+copied, no enrollment data is read or written.
+
+To intentionally install an older version anyway, pass `--force-downgrade`:
+
+```powershell
+CloudOrcAgentSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART --force-downgrade
+```
+
+A same-version or newer-version run is never affected by this check - that is the normal
+upgrade (or repair-reinstall) case.
+
+### G.2 Version command
+
+Both the installer and the installed Control Agent can report their own version, so a
+script can confirm what actually landed on a machine without inspecting the registry:
+
+```powershell
+CloudOrcAgentSetup.exe --version
+# CloudOrc Agent Installer
+# Version: 1.1.0
+
+C:\"Program Files"\CloudOrc\Agents\ControlAgent\CloudOrc.ControlAgent.exe --version
+# CloudOrc ControlAgent
+# Version: 1.1.0
+```
+
+(`CloudOrc.WatchdogAgent.exe --version` works the same way, for consistency.) All of
+these, plus the enrollment request's `AgentVersion` field and the WebSocket `HELLO`
+message's `agentVersion` field, come from the same `<Version>` MSBuild property
+(`Directory.Build.props` at the repo root, overridden per-build by
+`scripts/package-agent.ps1 -Version` and, in CI, the pushed release tag) - there is exactly
+one place a version number is ever set.
 
 ## H. Uninstall
 
@@ -276,6 +330,7 @@ process status, and recent related Windows event log entries. Exit code `0` = he
 |---|---|---|
 | Installer exits with code `10` | Control Agent service did not reach `Running` within ~10s of `sc start` | `C:\ProgramData\CloudOrc\ControlAgent\logs\controlagent-*.log`; confirm no other process is already using the same Named Pipe/port |
 | Installer exits with code `11` | Watchdog Agent service did not reach `Running` | `C:\ProgramData\CloudOrc\WatchdogAgent\logs\watchdogagent-*.log` |
+| Installer exits with code `30` | Downgrade protection - the installed version is newer than this installer | Confirm you're running the intended installer version, or pass `--force-downgrade` if the downgrade is intentional - see [§G.1](#g1-downgrade-protection) |
 | `install-cloudorc.ps1` fails with "still the placeholder values" | Repo owner/name not configured | See [C. GitHub repository setup](#c-github-repository-setup) step 3, or pass `-RepositoryOwner`/`-RepositoryName` explicitly |
 | `install-cloudorc.ps1` fails with a SHA256 mismatch | Corrupted download, or a release published without a matching checksum | Re-download; never pass `-AllowUnverified` to work around a genuine mismatch - only use it for an old release that predates checksum publishing |
 | Installer silently does nothing under `/quiet` | `/quiet` is not a real Inno Setup switch | Use `/VERYSILENT` instead - see [F](#f-new-windows-server-installation) |

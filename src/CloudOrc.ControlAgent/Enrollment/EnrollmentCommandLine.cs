@@ -1,4 +1,5 @@
 using CloudOrc.Agent.Contracts.Enrollment;
+using CloudOrc.Agent.Contracts.Versioning;
 using CloudOrc.ControlAgent.Configuration;
 using CloudOrc.ControlAgent.Identity;
 using Microsoft.Extensions.Logging;
@@ -33,7 +34,7 @@ public static class EnrollmentCommandLine
         Directory.CreateDirectory(controlAgentOptions.DataDirectory);
 
         var machineId = MachineIdResolver.Resolve(controlAgentOptions.DataDirectory, logger);
-        var agentVersion = typeof(EnrollmentCommandLine).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        var agentVersion = AgentVersionInfo.GetVersion(typeof(EnrollmentCommandLine).Assembly);
 
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         var client = new EnrollmentClient(httpClient);

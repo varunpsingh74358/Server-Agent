@@ -116,13 +116,14 @@ public class ProtocolMessageSerializationTests
     [Fact]
     public void CommandStatusMessage_RoundTrips()
     {
-        var status = new CommandStatusMessage { CommandId = "test-001", Status = CommandStatus.Running };
+        var status = new CommandStatusMessage { CommandId = "test-001", CorrelationId = "corr-001", Status = CommandStatus.Running };
 
         var json = JsonSerializer.Serialize(status, ProtocolJson.Options);
         var roundTripped = JsonSerializer.Deserialize<CommandStatusMessage>(json, ProtocolJson.Options);
 
         Assert.Equal(ProtocolMessageTypes.CommandStatus, ProtocolJson.TryReadMessageType(json));
         Assert.Equal(CommandStatus.Running, roundTripped!.Status);
+        Assert.Equal("corr-001", roundTripped.CorrelationId);
     }
 
     [Fact]
@@ -131,12 +132,14 @@ public class ProtocolMessageSerializationTests
         var result = new CommandResult
         {
             CommandId = "test-001",
+            CorrelationId = "corr-001",
             Status = CommandStatus.Success,
             StartedAt = DateTimeOffset.UtcNow,
             CompletedAt = DateTimeOffset.UtcNow.AddSeconds(1),
             DurationMilliseconds = 1000,
             Output = ["line1", "line2"],
-            Error = null
+            Error = null,
+            ExitCode = 0
         };
 
         var message = CommandResultMessage.FromCommandResult(result);
@@ -145,24 +148,33 @@ public class ProtocolMessageSerializationTests
 
         Assert.Equal(ProtocolMessageTypes.CommandResult, ProtocolJson.TryReadMessageType(json));
         Assert.Equal(result.CommandId, roundTripped!.CommandId);
+        Assert.Equal(result.CorrelationId, roundTripped.CorrelationId);
         Assert.Equal(result.Status, roundTripped.Status);
         Assert.Equal(2, roundTripped.Output.Count);
+        Assert.Equal(0, roundTripped.ExitCode);
     }
 
     [Fact]
-    public void CommandMessage_RoundTripsWrappedCommandRequest()
+    public void CommandMessage_RoundTripsWithParametersAndCorrelationId()
     {
         var command = new CommandMessage
         {
-            Command = new CommandRequest { CommandId = "test-001", Script = "Get-Date", TimeoutSeconds = 30 }
+            CommandId = "test-001",
+            CorrelationId = "corr-001",
+            CommandType = "powershell-exec",
+            Parameters = new CommandParameters { Script = "Get-Date", TimeoutSeconds = 30 }
         };
 
         var json = JsonSerializer.Serialize(command, ProtocolJson.Options);
         var roundTripped = JsonSerializer.Deserialize<CommandMessage>(json, ProtocolJson.Options);
 
         Assert.Equal(ProtocolMessageTypes.Command, ProtocolJson.TryReadMessageType(json));
-        Assert.Equal("test-001", roundTripped!.Command.CommandId);
-        Assert.Equal("Get-Date", roundTripped.Command.Script);
+        Assert.Contains("\"commandType\":\"powershell-exec\"", json);
+        Assert.Contains("\"parameters\":{", json);
+        Assert.Equal("test-001", roundTripped!.CommandId);
+        Assert.Equal("corr-001", roundTripped.CorrelationId);
+        Assert.Equal("Get-Date", roundTripped.Parameters.Script);
+        Assert.Equal(30, roundTripped.Parameters.TimeoutSeconds);
     }
 
     [Fact]
@@ -176,12 +188,13 @@ public class ProtocolMessageSerializationTests
     [Fact]
     public void ErrorMessage_RoundTrips()
     {
-        var error = new ErrorMessage { Message = "bad command", RelatedCommandId = "test-001" };
+        var error = new ErrorMessage { Message = "bad command", RelatedCommandId = "test-001", CorrelationId = "corr-001" };
 
         var json = JsonSerializer.Serialize(error, ProtocolJson.Options);
         var roundTripped = JsonSerializer.Deserialize<ErrorMessage>(json, ProtocolJson.Options);
 
         Assert.Equal(ProtocolMessageTypes.Error, ProtocolJson.TryReadMessageType(json));
         Assert.Equal("test-001", roundTripped!.RelatedCommandId);
+        Assert.Equal("corr-001", roundTripped.CorrelationId);
     }
 }
