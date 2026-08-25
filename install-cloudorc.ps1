@@ -111,6 +111,14 @@ $exePath = Join-Path $workDir $assetName
 $checksumPath = Join-Path $workDir $checksumName
 
 try {
+    # PowerShell renders a live progress bar for Invoke-WebRequest by default, and
+    # redrawing it on (almost) every buffer chunk is dramatically slower than the actual
+    # download - often 10-100x, especially over an RDP/remote console. Suppressing it here
+    # (and restoring it in `finally` below) is what makes this download fast instead of
+    # looking stuck at "Downloading...", never a functional change to what gets downloaded.
+    $previousProgressPreference = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+
     Write-Host "`nDownloading $exeUrl"
     Invoke-WebRequest -Uri $exeUrl -OutFile $exePath -UseBasicParsing
 
@@ -125,6 +133,8 @@ try {
         $checksumAvailable = (Test-Path $checksumPath) -and ((Get-Item $checksumPath).Length -gt 0)
     } catch {
         Write-Host "Could not download checksum file: $($_.Exception.Message)" -ForegroundColor Yellow
+    } finally {
+        $ProgressPreference = $previousProgressPreference
     }
 
     if ($checksumAvailable) {

@@ -42,7 +42,7 @@ public sealed class EnrollmentClient(HttpClient httpClient)
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or UriFormatException)
         {
-            return EnrollmentOutcome.Failure($"Could not reach the enrollment endpoint: {ex.Message}");
+            return EnrollmentOutcome.Failure($"Could not reach the enrollment endpoint: {DescribeWithInnerExceptions(ex)}");
         }
 
         using (response)
@@ -75,6 +75,29 @@ public sealed class EnrollmentClient(HttpClient httpClient)
 
             return EnrollmentOutcome.Success(payload);
         }
+    }
+
+    /// <summary>
+    /// .NET's top-level message for a failed TLS handshake is the generic
+    /// "The SSL connection could not be established, see inner exception." - the actually
+    /// useful detail (untrusted certificate chain, hostname mismatch, protocol mismatch,
+    /// a proxy/firewall resetting the connection, etc.) lives one or two
+    /// <see cref="Exception.InnerException"/> levels down. Surfacing the whole chain here
+    /// is what turns an unhelpful "could not connect" message into something an operator
+    /// can actually act on without needing to attach a debugger.
+    /// </summary>
+    private static string DescribeWithInnerExceptions(Exception ex)
+    {
+        var messages = new List<string>();
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (messages.Count == 0 || !string.Equals(messages[^1], current.Message, StringComparison.Ordinal))
+            {
+                messages.Add(current.Message);
+            }
+        }
+
+        return string.Join(" -> ", messages);
     }
 
     private static async Task<string?> SafeReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)

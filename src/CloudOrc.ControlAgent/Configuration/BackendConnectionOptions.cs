@@ -45,4 +45,56 @@ public sealed class BackendConnectionOptions
     public int HeartbeatIntervalSeconds { get; set; } = 15;
 
     public int TelemetryIntervalSeconds { get; set; } = 10;
+
+    /// <summary>
+    /// Extra backend connections to maintain simultaneously alongside the primary
+    /// Url/Enabled connection above - e.g. a real production backend plus a local
+    /// tunnel (ngrok or similar) for development. Each entry opens its own independent
+    /// WebSocket connection with its own reconnect loop and optional credential; every
+    /// one of them can receive COMMAND messages, and every outgoing
+    /// HEARTBEAT/TELEMETRY/COMMAND_RESULT/STATUS message is broadcast to all of them.
+    /// ConnectTimeoutSeconds, the reconnect settings, and the heartbeat/telemetry
+    /// intervals above are shared by every target - only Url/Credential/
+    /// DevelopmentAllowInsecureWs differ per entry. Empty by default, so an existing
+    /// single-backend configuration is completely unaffected.
+    /// </summary>
+    public List<BackendTargetOptions> AdditionalTargets { get; set; } = [];
+}
+
+/// <summary>
+/// One extra backend WebSocket target beyond the primary Url/Enabled connection declared
+/// directly on <see cref="BackendConnectionOptions"/>. See
+/// <see cref="BackendConnectionOptions.AdditionalTargets"/>.
+/// </summary>
+public sealed class BackendTargetOptions
+{
+    /// <summary>
+    /// Unique label for this connection, used in logs and internal health tracking.
+    /// "default" is reserved for the primary connection above and cannot be reused here.
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Per-target switch, defaulting to true - set false to keep an entry in config without connecting to it.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>e.g. a local tunnel URL such as <c>wss://your-tunnel-host/agent</c> for development.</summary>
+    public string Url { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Must be explicitly true to allow an insecure <c>ws://</c> URL for this target,
+    /// exactly like <see cref="BackendConnectionOptions.DevelopmentAllowInsecureWs"/> does
+    /// for the primary connection.
+    /// </summary>
+    public bool DevelopmentAllowInsecureWs { get; set; }
+
+    /// <summary>
+    /// Optional bearer credential for this specific target. Unlike the primary
+    /// connection's credential (always the enrollment-issued one), this is read directly
+    /// from configuration - appropriate for a local/dev backend that issues its own test
+    /// credential, or requires none at all (leave empty). Never commit a real credential
+    /// here in a tracked config file - supply it via an environment variable
+    /// (e.g. <c>BackendConnection__AdditionalTargets__0__Credential</c>) or another
+    /// untracked, out-of-repo source instead.
+    /// </summary>
+    public string? Credential { get; set; }
 }

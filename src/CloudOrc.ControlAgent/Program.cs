@@ -1,4 +1,5 @@
 using CloudOrc.Agent.Contracts.Abstractions;
+using CloudOrc.Agent.Contracts.Identity;
 using CloudOrc.Agent.Contracts.Versioning;
 using CloudOrc.ControlAgent.Backend;
 using CloudOrc.ControlAgent.Configuration;
@@ -84,31 +85,25 @@ builder.Services.AddSerilog((services, loggerConfiguration) => loggerConfigurati
         retainedFileCountLimit: 14,
         outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}"));
 
-// Fail fast on an unsafe backend configuration - never silently allow an insecure ws://
-// connection unless the operator has explicitly opted into development mode. This check
-// does not apply to a URL that came from enrollment: that value was issued by an
-// authenticated backend response, not typed by a human into a config file, so the
-// human-error guard rail it exists for does not apply.
-if (backendOptions.Enabled)
+if (backendOptions.Enabled && string.IsNullOrWhiteSpace(backendOptions.Url))
 {
-    var isInsecureWs = backendOptions.Url.StartsWith("ws://", StringComparison.OrdinalIgnoreCase);
-    if (isInsecureWs && !backendOptions.DevelopmentAllowInsecureWs && !backendUrlIsFromEnrollment)
-    {
-        throw new InvalidOperationException(
-            $"BackendConnection.Url ('{backendOptions.Url}') uses insecure ws://, but " +
-            $"BackendConnection.DevelopmentAllowInsecureWs is false. Either use a wss:// URL, " +
-            $"or set DevelopmentAllowInsecureWs to true for LOCAL TESTING ONLY. Refusing to start.");
-    }
-
-    if (string.IsNullOrWhiteSpace(backendOptions.Url))
-    {
-        throw new InvalidOperationException("BackendConnection.Enabled is true but BackendConnection.Url is empty.");
-    }
+    throw new InvalidOperationException("BackendConnection.Enabled is true but BackendConnection.Url is empty.");
 }
 
-if (!controlAgentOptions.LocalFileModeEnabled && !backendOptions.Enabled)
+// Resolves the primary connection plus every entry in BackendConnection.AdditionalTargets
+// (e.g. a local development tunnel alongside the real production backend) into the final
+// list of backend targets this agent will connect to - one BackendConnectionService per
+// target, all running simultaneously. Fails fast on an unsafe target (an insecure ws://
+// URL without DevelopmentAllowInsecureWs) exactly as before, just generalized across every
+// target instead of only the primary one. This check does not apply to a URL that came
+// from enrollment: that value was issued by an authenticated backend response, not typed
+// by a human into a config file, so the human-error guard rail it exists for does not apply.
+var resolvedBackendTargets = BackendTargetResolver.Resolve(backendOptions, enrolledState?.Credential, backendUrlIsFromEnrollment);
+var backendFeatureEnabled = resolvedBackendTargets.Count > 0;
+
+if (!controlAgentOptions.LocalFileModeEnabled && !backendFeatureEnabled)
 {
-    Log.Warning("Both ControlAgent.LocalFileModeEnabled and BackendConnection.Enabled are false - this agent will not receive any commands from any source.");
+    Log.Warning("Both ControlAgent.LocalFileModeEnabled is false and no backend target is configured - this agent will not receive any commands from any source.");
 }
 
 // Runs as a normal console app under `dotnet run`; automatically switches to Windows
@@ -134,18 +129,47 @@ if (controlAgentOptions.LocalFileModeEnabled)
     builder.Services.AddSingleton<ICommandResultSink, LocalFileResultSink>();
 }
 
-if (backendOptions.Enabled)
+if (backendFeatureEnabled)
 {
     builder.Services.AddSingleton<AgentIdentityProvider>();
     builder.Services.AddSingleton(sp => sp.GetRequiredService<AgentIdentityProvider>().GetIdentity());
-    builder.Services.AddSingleton<OutgoingMessageChannel>();
+
+    // One channel shared by every target: TryEnqueue broadcasts a HEARTBEAT/TELEMETRY/
+    // COMMAND_RESULT/STATUS to all of them, while each BackendConnectionService reads only
+    // its own named queue. Registered with registerDefaultTarget:false and given the exact
+    // resolved target list up front, so there is never an unused, never-drained "default"
+    // queue silently accumulating messages when the primary connection isn't one of them.
+    builder.Services.AddSingleton(_ =>
+    {
+        var channel = new OutgoingMessageChannel(registerDefaultTarget: false);
+        foreach (var target in resolvedBackendTargets)
+        {
+            channel.RegisterTarget(target.Name);
+        }
+
+        return channel;
+    });
+
     builder.Services.AddSingleton<WssCommandSource>();
     builder.Services.AddSingleton<ICommandSource>(sp => sp.GetRequiredService<WssCommandSource>());
     builder.Services.AddSingleton<ICommandResultSink, WssResultSink>();
     builder.Services.AddSingleton<ICommandStatusPublisher, BackendCommandStatusPublisher>();
     builder.Services.AddSingleton<TelemetryCollector>();
 
-    builder.Services.AddHostedService<BackendConnectionService>();
+    foreach (var target in resolvedBackendTargets)
+    {
+        builder.Services.AddHostedService(sp => new BackendConnectionService(
+            sp.GetRequiredService<IOptions<BackendConnectionOptions>>(),
+            sp.GetRequiredService<AgentIdentity>(),
+            sp.GetRequiredService<OutgoingMessageChannel>(),
+            sp.GetRequiredService<WssCommandSource>(),
+            sp.GetRequiredService<ControlAgentHealthState>(),
+            sp.GetRequiredService<ILogger<BackendConnectionService>>(),
+            target.Name,
+            target.Url,
+            target.Credential));
+    }
+
     builder.Services.AddHostedService<HeartbeatPublisherService>();
     builder.Services.AddHostedService<TelemetryPublisherService>();
 }
@@ -163,8 +187,9 @@ var host = builder.Build();
 try
 {
     Log.Information(
-        "CloudOrc Control Agent starting. Data directory: {DataDirectory}. LocalFileMode={LocalFileMode}, BackendConnection={BackendEnabled}, Enrolled={Enrolled}.",
-        controlAgentOptions.DataDirectory, controlAgentOptions.LocalFileModeEnabled, backendOptions.Enabled, backendUrlIsFromEnrollment);
+        "CloudOrc Control Agent starting. Data directory: {DataDirectory}. LocalFileMode={LocalFileMode}, BackendConnection={BackendEnabled}, Enrolled={Enrolled}, BackendTargets=[{BackendTargets}].",
+        controlAgentOptions.DataDirectory, controlAgentOptions.LocalFileModeEnabled, backendFeatureEnabled, backendUrlIsFromEnrollment,
+        string.Join(", ", resolvedBackendTargets.Select(t => t.Name)));
     host.Run();
 }
 finally
