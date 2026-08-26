@@ -22,7 +22,6 @@ public sealed class ControlAgentHealthState
     private long _processedCount;
     private long _failedCount;
     private BackendConnectionState _backendConnectionState = BackendConnectionState.Disabled;
-    private readonly Dictionary<string, BackendConnectionState> _targetConnectionStates = new(StringComparer.OrdinalIgnoreCase);
 
     public void TouchDetection()
     {
@@ -74,59 +73,14 @@ public sealed class ControlAgentHealthState
     /// Records the current backend connectivity state for reporting purposes only. This
     /// must never influence <see cref="Snapshot"/>'s HEALTHY/DEGRADED computation - a
     /// disconnected backend is not the same thing as an unhealthy Control Agent. See
-    /// docs/ARCHITECTURE.md. Equivalent to calling the two-argument overload for the
-    /// "default" (primary) connection.
+    /// docs/ARCHITECTURE.md.
     /// </summary>
-    public void SetBackendConnectionState(BackendConnectionState state) =>
-        SetBackendConnectionState("default", state);
-
-    /// <summary>
-    /// Same as <see cref="SetBackendConnectionState(BackendConnectionState)"/> but scoped
-    /// to one named backend target, for agents maintaining more than one simultaneous
-    /// backend connection (e.g. a production connection plus a local development tunnel).
-    /// The aggregate state exposed on <see cref="ControlAgentHealthSnapshot"/> reflects the
-    /// best state across all known targets - Connected if any target is connected,
-    /// otherwise Connecting/Reconnecting if any target is mid-attempt, otherwise
-    /// Disconnected, otherwise Disabled - so existing single-target callers and the
-    /// wire-level snapshot contract are unaffected by adding more targets.
-    /// </summary>
-    public void SetBackendConnectionState(string targetName, BackendConnectionState state)
+    public void SetBackendConnectionState(BackendConnectionState state)
     {
         lock (_sync)
         {
-            _targetConnectionStates[targetName] = state;
-            _backendConnectionState = ComputeAggregateBackendConnectionState();
+            _backendConnectionState = state;
         }
-    }
-
-    private BackendConnectionState ComputeAggregateBackendConnectionState()
-    {
-        if (_targetConnectionStates.Count == 0)
-        {
-            return BackendConnectionState.Disabled;
-        }
-
-        if (_targetConnectionStates.Values.Any(s => s == BackendConnectionState.Connected))
-        {
-            return BackendConnectionState.Connected;
-        }
-
-        if (_targetConnectionStates.Values.Any(s => s == BackendConnectionState.Connecting))
-        {
-            return BackendConnectionState.Connecting;
-        }
-
-        if (_targetConnectionStates.Values.Any(s => s == BackendConnectionState.Reconnecting))
-        {
-            return BackendConnectionState.Reconnecting;
-        }
-
-        if (_targetConnectionStates.Values.Any(s => s == BackendConnectionState.Disconnected))
-        {
-            return BackendConnectionState.Disconnected;
-        }
-
-        return BackendConnectionState.Disabled;
     }
 
     public ControlAgentHealthSnapshot Snapshot(TimeSpan heartbeatTimeout)

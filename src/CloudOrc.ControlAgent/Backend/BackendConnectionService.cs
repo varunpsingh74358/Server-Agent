@@ -13,21 +13,15 @@ using Microsoft.Extensions.Options;
 namespace CloudOrc.ControlAgent.Backend;
 
 /// <summary>
-/// Owns exactly one outbound WebSocket connection to one backend target: connect, send
-/// HELLO, run the send/receive loops, and reconnect with backoff on any failure. One
-/// instance is created per configured <see cref="ResolvedBackendTarget"/> (see
-/// Program.cs) - e.g. one for the primary/enrolled production backend and one more per
-/// entry in <see cref="BackendConnectionOptions.AdditionalTargets"/> (a local development
-/// tunnel, for example) - so the agent can stay connected to several backends at once.
-/// Each instance is the ONLY thing that calls <see cref="ClientWebSocket.SendAsync"/> for
-/// its own socket - everything else (heartbeat, telemetry, status, results) publishes
-/// through the shared <see cref="OutgoingMessageChannel"/> instead, which broadcasts to
-/// every target's queue and is what keeps sending thread-safe across connections.
+/// Owns the agent's single outbound WebSocket connection to the backend: connect, send
+/// HELLO, run the send/receive loops, and reconnect with backoff on any failure. This is
+/// the ONLY place that calls <see cref="ClientWebSocket.SendAsync"/> - everything else
+/// (heartbeat, telemetry, status, results) publishes through <see cref="OutgoingMessageChannel"/>
+/// instead, which is what keeps sending thread-safe.
 ///
 /// A disconnected/failed backend connection is logged and retried - it never throws out
-/// of <see cref="ExecuteAsync"/>, so it can never crash the Control Agent, interrupt local
-/// file command processing, or affect any other target's connection, all of which run
-/// entirely independently.
+/// of <see cref="ExecuteAsync"/>, so it can never crash the Control Agent or interrupt
+/// local file command processing, which runs entirely independently.
 /// </summary>
 public sealed class BackendConnectionService(
     IOptions<BackendConnectionOptions> options,
@@ -35,22 +29,17 @@ public sealed class BackendConnectionService(
     OutgoingMessageChannel outgoing,
     WssCommandSource commandSource,
     ControlAgentHealthState health,
-    ILogger<BackendConnectionService> logger,
-    string targetName = OutgoingMessageChannel.DefaultTargetName,
-    string? targetUrl = null,
-    string? targetCredential = null) : BackgroundService
+    ILogger<BackendConnectionService> logger) : BackgroundService
 {
     private readonly BackendConnectionOptions _options = options.Value;
-    private readonly string _url = targetUrl ?? options.Value.Url;
-    private readonly string? _credential = targetCredential ?? identity.Credential;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var backoff = new ReconnectBackoffCalculator(_options);
 
         logger.LogInformation(
-            "Backend connection worker starting for target '{TargetName}'. Url: {Url} (agentId={AgentId}, serverId={ServerId}).",
-            targetName, _url, identity.AgentId, identity.ServerId);
+            "Backend connection worker starting. Target: {Url} (agentId={AgentId}, serverId={ServerId}).",
+            _options.Url, identity.AgentId, identity.ServerId);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -64,7 +53,7 @@ public sealed class BackendConnectionService(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Backend connection attempt to target '{TargetName}' failed.", targetName);
+                logger.LogWarning(ex, "Backend connection attempt failed.");
             }
 
             if (stoppingToken.IsCancellationRequested)
@@ -73,8 +62,8 @@ public sealed class BackendConnectionService(
             }
 
             var delay = backoff.NextDelay();
-            health.SetBackendConnectionState(targetName, BackendConnectionState.Reconnecting);
-            logger.LogInformation("Reconnecting to target '{TargetName}' in {DelaySeconds:F0}s.", targetName, delay.TotalSeconds);
+            health.SetBackendConnectionState(BackendConnectionState.Reconnecting);
+            logger.LogInformation("Reconnecting to backend in {DelaySeconds:F0}s.", delay.TotalSeconds);
 
             try
             {
@@ -86,22 +75,22 @@ public sealed class BackendConnectionService(
             }
         }
 
-        health.SetBackendConnectionState(targetName, BackendConnectionState.Disabled);
-        logger.LogInformation("Backend connection worker for target '{TargetName}' stopped.", targetName);
+        health.SetBackendConnectionState(BackendConnectionState.Disabled);
+        logger.LogInformation("Backend connection worker stopped.");
     }
 
     private async Task RunOneConnectionAsync(ReconnectBackoffCalculator backoff, CancellationToken stoppingToken)
     {
         using var socket = new ClientWebSocket();
-        health.SetBackendConnectionState(targetName, BackendConnectionState.Connecting);
+        health.SetBackendConnectionState(BackendConnectionState.Connecting);
 
-        // Present this target's permanent credential (never a one-time enrollment
-        // secret) on the handshake itself, before any protocol message is exchanged.
-        // Absent entirely for a non-enrolled, local-testing target - the backend/test
-        // server side decides whether to require it.
-        if (!string.IsNullOrEmpty(_credential))
+        // Present the enrollment-issued permanent credential (never the one-time
+        // enrollment secret) on the handshake itself, before any protocol message is
+        // exchanged. Absent entirely for a non-enrolled, local-testing agent - the
+        // backend/test server side decides whether to require it.
+        if (!string.IsNullOrEmpty(identity.Credential))
         {
-            socket.Options.SetRequestHeader("Authorization", $"Bearer {_credential}");
+            socket.Options.SetRequestHeader("Authorization", $"Bearer {identity.Credential}");
         }
 
         using (var connectCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
@@ -109,7 +98,7 @@ public sealed class BackendConnectionService(
             connectCts.CancelAfter(TimeSpan.FromSeconds(_options.ConnectTimeoutSeconds));
             try
             {
-                await socket.ConnectAsync(new Uri(_url), connectCts.Token).ConfigureAwait(false);
+                await socket.ConnectAsync(new Uri(_options.Url), connectCts.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
@@ -119,13 +108,13 @@ public sealed class BackendConnectionService(
                 // of a bare TaskCanceledException stack trace.
                 var wasConnectTimeout = connectCts.IsCancellationRequested;
                 var reason = ConnectionFailureClassifier.Classify(ex, wasConnectTimeout);
-                logger.LogWarning("Could not connect to target '{TargetName}' at {Url}: {Reason}", targetName, _url, reason);
+                logger.LogWarning("Could not connect to backend at {Url}: {Reason}", _options.Url, reason);
                 throw;
             }
         }
 
-        logger.LogInformation("Connected to target '{TargetName}' at {Url}.", targetName, _url);
-        health.SetBackendConnectionState(targetName, BackendConnectionState.Connected);
+        logger.LogInformation("Connected to backend at {Url}.", _options.Url);
+        health.SetBackendConnectionState(BackendConnectionState.Connected);
         backoff.Reset();
 
         await SendHelloAsync(socket, stoppingToken).ConfigureAwait(false);
@@ -141,7 +130,7 @@ public sealed class BackendConnectionService(
         }
         finally
         {
-            health.SetBackendConnectionState(targetName, BackendConnectionState.Disconnected);
+            health.SetBackendConnectionState(BackendConnectionState.Disconnected);
             await CloseQuietlyAsync(socket).ConfigureAwait(false);
         }
 
@@ -177,7 +166,7 @@ public sealed class BackendConnectionService(
 
     private async Task SendLoopAsync(ClientWebSocket socket, CancellationToken stoppingToken)
     {
-        await foreach (var json in outgoing.ReadAllAsync(targetName, stoppingToken).ConfigureAwait(false))
+        await foreach (var json in outgoing.ReadAllAsync(stoppingToken).ConfigureAwait(false))
         {
             if (socket.State != WebSocketState.Open)
             {
@@ -267,7 +256,7 @@ public sealed class BackendConnectionService(
                 RelatedCommandId = message.CommandId,
                 CorrelationId = message.CorrelationId
             };
-            outgoing.TryEnqueueTo(targetName, JsonSerializer.Serialize(typeError, ProtocolJson.Options));
+            outgoing.TryEnqueue(JsonSerializer.Serialize(typeError, ProtocolJson.Options));
             return;
         }
 
@@ -291,7 +280,7 @@ public sealed class BackendConnectionService(
                 RelatedCommandId = request.CommandId,
                 CorrelationId = request.CorrelationId
             };
-            outgoing.TryEnqueueTo(targetName, JsonSerializer.Serialize(error, ProtocolJson.Options));
+            outgoing.TryEnqueue(JsonSerializer.Serialize(error, ProtocolJson.Options));
         }
     }
 
@@ -311,7 +300,7 @@ public sealed class BackendConnectionService(
                 : snapshot.LastDetectionActivityAt
         };
 
-        outgoing.TryEnqueueTo(targetName, JsonSerializer.Serialize(heartbeat, ProtocolJson.Options));
+        outgoing.TryEnqueue(JsonSerializer.Serialize(heartbeat, ProtocolJson.Options));
     }
 
     private static async Task CloseQuietlyAsync(ClientWebSocket socket)
