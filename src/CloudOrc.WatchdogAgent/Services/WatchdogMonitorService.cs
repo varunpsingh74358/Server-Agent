@@ -22,6 +22,7 @@ public sealed class WatchdogMonitorService(
     ControlAgentHealthClient healthClient,
     ConsecutiveFailureTracker failureTracker,
     RecoveryRateLimiter rateLimiter,
+    WatchdogResourceMonitors resourceMonitors,
     ILogger<WatchdogMonitorService> logger) : BackgroundService
 {
     private readonly WatchdogOptions _options = options.Value;
@@ -82,6 +83,8 @@ public sealed class WatchdogMonitorService(
             logger.LogWarning("Health check did not get a response from the Control Agent.");
         }
 
+        LogResourceUsage();
+
         if (healthy)
         {
             var previousFailures = failureTracker.RecordSuccess();
@@ -104,6 +107,38 @@ public sealed class WatchdogMonitorService(
         }
 
         await AttemptRecoveryAsync(stoppingToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Logged every monitoring cycle (same cadence as the health check above, so tailing
+    /// the Watchdog's log file is a live view) - live CPU/memory usage for both the
+    /// Control Agent it watches and the Watchdog itself, independent of the HEALTHY/
+    /// DEGRADED health check: a process can be alive and responding on its worker loops
+    /// while still using an unexpectedly large or growing amount of memory, which this
+    /// line is what would surface.
+    /// </summary>
+    private void LogResourceUsage()
+    {
+        var controlAgent = resourceMonitors.ControlAgent.Sample();
+        var self = resourceMonitors.Self.Sample();
+
+        logger.LogInformation(
+            "Resource usage: ControlAgent [{ControlAgentUsage}]; WatchdogAgent (self) [{WatchdogUsage}].",
+            Describe(controlAgent), Describe(self));
+    }
+
+    private static string Describe(ProcessResourceSnapshot snapshot)
+    {
+        if (!snapshot.IsRunning)
+        {
+            return "not running";
+        }
+
+        var cpu = snapshot.CpuPercent is { } cpuPercent ? $"{cpuPercent:F1}%" : "n/a (first sample)";
+        var workingSetMb = snapshot.WorkingSetBytes is { } workingSet ? $"{workingSet / 1024.0 / 1024.0:F1} MB" : "n/a";
+        var privateMemoryMb = snapshot.PrivateMemoryBytes is { } privateMemory ? $"{privateMemory / 1024.0 / 1024.0:F1} MB" : "n/a";
+
+        return $"pid={snapshot.ProcessId}, cpu={cpu}, workingSet={workingSetMb}, privateMemory={privateMemoryMb}";
     }
 
     private async Task AttemptRecoveryAsync(CancellationToken stoppingToken)

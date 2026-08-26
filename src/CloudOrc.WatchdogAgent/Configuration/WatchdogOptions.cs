@@ -20,6 +20,14 @@ public sealed class WatchdogOptions
     public string ControlAgentServiceName { get; set; } = "CloudOrcControlAgent";
 
     /// <summary>
+    /// Process name (no ".exe") the Watchdog looks up in the OS process table every
+    /// monitoring cycle to report the Control Agent's own CPU/memory usage - distinct
+    /// from <see cref="ControlAgentServiceName"/> (the Windows Service name), which is not
+    /// the same string as the executable/process name.
+    /// </summary>
+    public string ControlAgentProcessName { get; set; } = "CloudOrc.ControlAgent";
+
+    /// <summary>
     /// Named pipe the Control Agent's health server listens on.
     /// </summary>
     public string HealthPipeName { get; set; } = "CloudOrc.ControlAgent.Health";
