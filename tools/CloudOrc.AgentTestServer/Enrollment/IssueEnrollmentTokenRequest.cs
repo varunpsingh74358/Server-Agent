@@ -4,6 +4,15 @@ namespace CloudOrc.AgentTestServer.Enrollment;
 public sealed class IssueEnrollmentTokenRequest
 {
     public int? ValidForSeconds { get; set; }
+
+    /// <summary>
+    /// Optional. The IP address of the specific server this token is being issued for
+    /// (the one an admin chose when adding the server). When set, <c>POST /api/enroll</c>
+    /// rejects redemption from any other IP - binding the token to the machine it was
+    /// meant for, not just to whoever happens to hold the token string. Omit to preserve
+    /// the previous, unbound behavior (any machine holding the token can redeem it).
+    /// </summary>
+    public string? ExpectedIpAddress { get; set; }
 }
 
 /// <summary>Body for <c>POST /api/enrollment-tokens/revoke</c>.</summary>

@@ -167,6 +167,21 @@ Invoke-RestMethod -Uri "http://localhost:5299/api/enrollment-tokens" -Method Pos
 # -> { "token": "ENR-..." }
 ```
 
+To bind the token to the specific server it's meant for (recommended - see
+[Security properties](#security-properties) below), pass that server's IP address as
+`ExpectedIpAddress` when issuing it:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:5299/api/enrollment-tokens" -Method Post -ContentType "application/json" `
+    -Body '{ "ExpectedIpAddress": "10.20.30.40" }'
+```
+
+`POST /api/enroll` then rejects redemption from any IP other than `10.20.30.40`, even if
+the correct token string is presented - the check runs against the actual TCP connection
+making the redemption request (`HttpContext.Connection.RemoteIpAddress`), not anything the
+agent claims about itself. Omit `ExpectedIpAddress` to keep the previous, unbound
+behavior (any machine holding the token can redeem it).
+
 Use that token with the installer or directly with the CLI:
 
 ```powershell
@@ -180,6 +195,7 @@ CloudOrcAgentSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART --token "ENR-...
 | Property | How it's satisfied |
 |---|---|
 | Enrollment token is cryptographically random | 32 bytes from `RandomNumberGenerator.GetBytes`, base64url-encoded |
+| Can be bound to the target server's IP (optional) | `IssueToken(url, validFor, expectedIpAddress)` stores it; `ValidateAndConsume` rejects redemption from any other IP, checked against the redemption request's actual remote address (`HttpContext.Connection.RemoteIpAddress`), not anything the agent claims - a mismatched attempt is rejected without consuming the token. Not set by default (opt-in via `ExpectedIpAddress` on `POST /api/enrollment-tokens`) - without it, the token is unbound exactly as before this feature, and anyone holding the token string can redeem it from anywhere. |
 | Short-lived | `EnrollmentTokenStore.IssueToken(url, validFor)` - default 900s in the reference server |
 | Single-use | `ValidateAndConsume` marks used under a lock; a second attempt on the same secret fails, verified under concurrency |
 | Revocable before use | `RevokeByToken` - fails validation afterward, verified live |
@@ -222,6 +238,12 @@ backend shape - not a production-grade enrollment service. A real backend needs:
 - Credential rotation on a schedule, and an audit log of enrollments/revocations.
 - Rate limiting on the enrollment endpoint itself (to slow down token-guessing attempts,
   though a 32-byte random secret already makes guessing computationally infeasible).
+- If deployed behind a load balancer/reverse proxy, the IP-binding check above must read
+  the real client IP from a trusted forwarding header (e.g. `X-Forwarded-For`, validated
+  against a known-proxy allowlist) instead of `HttpContext.Connection.RemoteIpAddress` -
+  otherwise every request appears to come from the proxy's IP and the check becomes
+  meaningless. This reference server has no proxy in front of it, so it doesn't need this;
+  a production deployment behind one does.
 
 None of this requires any change to the Control Agent, the Watchdog, or the installer -
 the contract (`EnrollmentRequest`/`EnrollmentResponse` shapes, bearer-credential WebSocket

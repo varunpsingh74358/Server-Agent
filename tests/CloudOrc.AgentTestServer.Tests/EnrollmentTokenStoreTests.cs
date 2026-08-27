@@ -1,3 +1,4 @@
+using System.Net;
 using CloudOrc.AgentTestServer.Enrollment;
 
 namespace CloudOrc.AgentTestServer.Tests;
@@ -123,5 +124,74 @@ public class EnrollmentTokenStoreTests
         var tokenB = store.IssueToken(EnrollUrl, TimeSpan.FromMinutes(15));
 
         Assert.NotEqual(tokenA, tokenB);
+    }
+
+    [Fact]
+    public void ValidateAndConsume_NoExpectedIp_AnyCallerIpSucceeds_BackwardCompatible()
+    {
+        // A token issued without ExpectedIpAddress must behave exactly as before this
+        // feature existed - unbound, redeemable from anywhere.
+        var store = new EnrollmentTokenStore();
+        var token = store.IssueToken(EnrollUrl, TimeSpan.FromMinutes(15));
+
+        var result = store.ValidateAndConsume(DecodeSecret(token), IPAddress.Parse("203.0.113.9"));
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void ValidateAndConsume_ExpectedIp_MatchingCallerIp_Succeeds()
+    {
+        var store = new EnrollmentTokenStore();
+        var expectedIp = IPAddress.Parse("10.20.30.40");
+        var token = store.IssueToken(EnrollUrl, TimeSpan.FromMinutes(15), expectedIp);
+
+        var result = store.ValidateAndConsume(DecodeSecret(token), IPAddress.Parse("10.20.30.40"));
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void ValidateAndConsume_ExpectedIp_DifferentCallerIp_IsRejected_AndTokenStaysUnused()
+    {
+        var store = new EnrollmentTokenStore();
+        var expectedIp = IPAddress.Parse("10.20.30.40");
+        var token = store.IssueToken(EnrollUrl, TimeSpan.FromMinutes(15), expectedIp);
+        var secret = DecodeSecret(token);
+
+        var wrongIpAttempt = store.ValidateAndConsume(secret, IPAddress.Parse("10.20.30.41"));
+        Assert.False(wrongIpAttempt.IsValid);
+        Assert.Contains("bound to IP address", wrongIpAttempt.Error);
+
+        // The mismatched attempt must not have consumed the token - the legitimate
+        // server can still redeem it afterward.
+        var correctIpAttempt = store.ValidateAndConsume(secret, expectedIp);
+        Assert.True(correctIpAttempt.IsValid);
+    }
+
+    [Fact]
+    public void ValidateAndConsume_ExpectedIp_NoCallerIpProvided_IsRejected()
+    {
+        var store = new EnrollmentTokenStore();
+        var token = store.IssueToken(EnrollUrl, TimeSpan.FromMinutes(15), IPAddress.Parse("10.20.30.40"));
+
+        var result = store.ValidateAndConsume(DecodeSecret(token));
+
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void ValidateAndConsume_ExpectedIp_Ipv4MappedIpv6CallerAddress_StillMatches()
+    {
+        // Kestrel can report a loopback/dual-stack connection's RemoteIpAddress as the
+        // IPv6-mapped form of an IPv4 address - this must not spuriously fail the check.
+        var store = new EnrollmentTokenStore();
+        var expectedIp = IPAddress.Parse("127.0.0.1");
+        var token = store.IssueToken(EnrollUrl, TimeSpan.FromMinutes(15), expectedIp);
+
+        var mappedCallerIp = IPAddress.Parse("::ffff:127.0.0.1");
+        var result = store.ValidateAndConsume(DecodeSecret(token), mappedCallerIp);
+
+        Assert.True(result.IsValid);
     }
 }

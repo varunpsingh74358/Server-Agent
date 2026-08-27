@@ -1,3 +1,4 @@
+using System.Net;
 using CloudOrc.Agent.Contracts.Enrollment;
 using CloudOrc.AgentTestServer;
 using CloudOrc.AgentTestServer.Enrollment;
@@ -97,9 +98,20 @@ app.Map("/agent", async (HttpContext context, AgentSession session, CredentialSt
 
 app.MapPost("/api/enrollment-tokens", (IssueEnrollmentTokenRequest? request, EnrollmentTokenStore tokens) =>
 {
+    IPAddress? expectedIp = null;
+    if (!string.IsNullOrWhiteSpace(request?.ExpectedIpAddress))
+    {
+        if (!IPAddress.TryParse(request.ExpectedIpAddress, out expectedIp))
+        {
+            return Results.BadRequest(new { error = $"ExpectedIpAddress '{request.ExpectedIpAddress}' is not a valid IP address." });
+        }
+    }
+
     var validFor = TimeSpan.FromSeconds(request?.ValidForSeconds ?? 900);
-    var token = tokens.IssueToken(enrollmentUrl, validFor);
-    Console.WriteLine($"[test-server] Issued a new enrollment token (valid for {validFor.TotalSeconds:F0}s).");
+    var token = tokens.IssueToken(enrollmentUrl, validFor, expectedIp);
+    Console.WriteLine(expectedIp is null
+        ? $"[test-server] Issued a new enrollment token (valid for {validFor.TotalSeconds:F0}s, not IP-bound)."
+        : $"[test-server] Issued a new enrollment token (valid for {validFor.TotalSeconds:F0}s, bound to {expectedIp}).");
     return Results.Ok(new { token });
 });
 
@@ -119,9 +131,9 @@ app.MapPost("/api/credentials/revoke", (RevokeCredentialRequest request, Credent
         : Results.BadRequest(new { revoked = false, error = "Credential not found." });
 });
 
-app.MapPost("/api/enroll", (EnrollmentRequest request, EnrollmentTokenStore tokens, CredentialStore credentials) =>
+app.MapPost("/api/enroll", (EnrollmentRequest request, HttpContext context, EnrollmentTokenStore tokens, CredentialStore credentials) =>
 {
-    var validation = tokens.ValidateAndConsume(request.Secret);
+    var validation = tokens.ValidateAndConsume(request.Secret, context.Connection.RemoteIpAddress);
     if (!validation.IsValid)
     {
         Console.WriteLine($"[test-server] Enrollment rejected for machine '{request.MachineName}': {validation.Error}");
