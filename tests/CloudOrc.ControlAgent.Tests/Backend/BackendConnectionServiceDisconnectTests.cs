@@ -75,6 +75,52 @@ public sealed class BackendConnectionServiceDisconnectTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_BackendSendsGoingAwayClose_AgentReconnectsPromptly()
+    {
+        // Simulates a backend gracefully closing the socket during a deploy/restart
+        // (WS close code 1001, "Going Away") rather than an abrupt drop - covers the
+        // distinct log branch in BackendConnectionService.ReceiveLoopAsync and confirms
+        // reconnect still happens from the initial backoff delay, not an accumulated one.
+        await using var server = LoopbackWebSocketServer.Start();
+
+        var options = Options.Create(new BackendConnectionOptions
+        {
+            Enabled = true,
+            Url = server.Url,
+            ConnectTimeoutSeconds = 5,
+            ReconnectInitialDelaySeconds = 1,
+            ReconnectMaximumDelaySeconds = 1
+        });
+        var identity = new AgentIdentity { AgentId = "agent-goingaway-test", ServerId = "server-1", MachineId = "machine-1", MachineName = "HOST-1", AgentVersion = "0.0.0" };
+        var outgoing = new OutgoingMessageChannel();
+        var commandSource = new WssCommandSource(Options.Create(new ControlAgentOptions()), NullLogger<WssCommandSource>.Instance);
+        var health = new ControlAgentHealthState();
+        var service = new BackendConnectionService(options, identity, outgoing, commandSource, health, NullLogger<BackendConnectionService>.Instance);
+
+        var firstConnectionTask = server.WaitForNextConnectionAsync(TimeSpan.FromSeconds(30));
+        await service.StartAsync(CancellationToken.None);
+
+        var firstSocket = await firstConnectionTask;
+
+        using var helloCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await firstSocket.ReceiveAsync(new byte[4096], helloCts.Token);
+
+        Assert.Equal(BackendConnectionState.Connected, health.Snapshot(TimeSpan.FromSeconds(30)).BackendConnectionState);
+
+        var secondConnectionTask = server.WaitForNextConnectionAsync(TimeSpan.FromSeconds(30));
+
+        using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await firstSocket.CloseAsync(WebSocketCloseStatus.EndpointUnavailable, "redeploying", closeCts.Token);
+
+        var secondSocket = await secondConnectionTask;
+        Assert.NotNull(secondSocket);
+
+        Assert.False(service.ExecuteTask is { IsFaulted: true }, "The connection worker must survive a graceful going-away close and keep retrying, never fault out of ExecuteAsync.");
+
+        await service.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task LocalCommandProcessing_ContinuesNormally_WhileBackendConnectionIsFailing()
     {
         // BackendConnectionService is pointed at a port nothing listens on, so every

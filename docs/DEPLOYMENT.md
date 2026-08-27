@@ -98,10 +98,22 @@ Edit `BackendConnection` in `<ControlAgent folder>\appsettings.json`:
   "ConnectTimeoutSeconds": 10,
   "ReconnectInitialDelaySeconds": 2,
   "ReconnectMaximumDelaySeconds": 60,
+  "ReconnectJitterMaxMilliseconds": 3000,
   "HeartbeatIntervalSeconds": 15,
   "TelemetryIntervalSeconds": 10
 }
 ```
+
+`ReconnectJitterMaxMilliseconds` (default `3000` in the shipped `appsettings.json`) adds a
+small random delay on top of every reconnect attempt so a whole fleet of agents doesn't
+retry in lockstep the moment the backend comes back up after a deploy/restart - without
+it, every agent that was connected at redeploy time would hit the backend in the same
+instant, which is exactly the "thundering herd" that makes a routine deploy look like an
+outage. This does not change per-agent reconnect latency in any meaningful way (it only
+adds up to 3s of spread), and every agent still reconnects on its own within seconds of
+the backend becoming reachable again - a disconnect during a backend deploy is expected
+WebSocket behavior (the backend process restarting drops every open connection, agent
+code notwithstanding), not a bug in this agent.
 
 - Leave `Enabled: false` (the default) to run in local-file-only mode.
 - For **local/test backend testing on this server** (pointing at

@@ -119,10 +119,22 @@ public sealed class BackendConnectionService(
 
         await SendHelloAsync(socket, stoppingToken).ConfigureAwait(false);
 
-        var receiveTask = ReceiveLoopAsync(socket, stoppingToken);
-        var sendTask = SendLoopAsync(socket, stoppingToken);
+        using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var receiveTask = ReceiveLoopAsync(socket, connectionCts.Token);
+        var sendTask = SendLoopAsync(socket, connectionCts.Token);
 
         var finished = await Task.WhenAny(receiveTask, sendTask).ConfigureAwait(false);
+
+        // Whichever loop is still running reacts to the connection ending only on its
+        // own schedule - SendLoopAsync in particular can be parked on an empty outgoing
+        // channel indefinitely, with nothing about a closed socket to wake it up until
+        // the next heartbeat/telemetry message happens to be queued. Cancel explicitly
+        // here so the other loop unblocks immediately: without this, a graceful backend
+        // close (the recommended way to signal a planned deploy/restart, as opposed to
+        // an abrupt drop) would delay this method's return - and therefore the next
+        // reconnect attempt - by up to a full heartbeat interval, or hang indefinitely
+        // if nothing is ever queued.
+        connectionCts.Cancel();
 
         try
         {
@@ -193,7 +205,25 @@ public sealed class BackendConnectionService(
 
                 if (receiveResult.MessageType == WebSocketMessageType.Close)
                 {
-                    logger.LogInformation("Backend closed the connection ({CloseStatus}: {CloseDescription}).", receiveResult.CloseStatus, receiveResult.CloseStatusDescription);
+                    // EndpointUnavailable (WS close code 1001, "Going Away") is the
+                    // conventional signal a server sends while shutting down for a
+                    // deploy/restart, as opposed to a protocol error or policy violation.
+                    // Called out distinctly so a deploy-caused disconnect is obviously
+                    // benign in the log, not confused with a real backend problem -
+                    // either way the reconnect loop in ExecuteAsync retries automatically
+                    // starting from the initial backoff delay (backoff.Reset() already
+                    // ran for this connection), not an accumulated one.
+                    if (receiveResult.CloseStatus == WebSocketCloseStatus.EndpointUnavailable)
+                    {
+                        logger.LogInformation(
+                            "Backend is going away ({CloseDescription}) - likely a planned restart/deployment. Reconnecting automatically.",
+                            receiveResult.CloseStatusDescription);
+                    }
+                    else
+                    {
+                        logger.LogInformation("Backend closed the connection ({CloseStatus}: {CloseDescription}).", receiveResult.CloseStatus, receiveResult.CloseStatusDescription);
+                    }
+
                     return;
                 }
 
