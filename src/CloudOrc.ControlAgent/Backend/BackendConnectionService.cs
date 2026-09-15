@@ -263,7 +263,7 @@ public sealed class BackendConnectionService(
         }
     }
 
-    private const string PowerShellExecCommandType = "powershell-exec";
+    private static readonly string[] SupportedCommandTypes = [CommandTypes.PowerShellExec, CommandTypes.RdpTransferPolicyApply];
 
     private void HandleCommandMessage(string json)
     {
@@ -274,7 +274,7 @@ public sealed class BackendConnectionService(
             return;
         }
 
-        if (!string.Equals(message.CommandType, PowerShellExecCommandType, StringComparison.Ordinal))
+        if (!SupportedCommandTypes.Contains(message.CommandType, StringComparer.Ordinal))
         {
             logger.LogWarning(
                 "Rejected incoming command {CommandId}: unsupported commandType '{CommandType}'.",
@@ -282,7 +282,7 @@ public sealed class BackendConnectionService(
 
             var typeError = new ErrorMessage
             {
-                Message = $"Unsupported commandType '{message.CommandType}'. Only '{PowerShellExecCommandType}' is supported.",
+                Message = $"Unsupported commandType '{message.CommandType}'. Supported types: {string.Join(", ", SupportedCommandTypes)}.",
                 RelatedCommandId = message.CommandId,
                 CorrelationId = message.CorrelationId
             };
@@ -297,6 +297,9 @@ public sealed class BackendConnectionService(
             CommandType = message.CommandType,
             Script = message.Parameters.Script,
             TimeoutSeconds = message.Parameters.TimeoutSeconds,
+            ClientToServerClipboard = message.Parameters.ClientToServerClipboard,
+            ServerToClientClipboard = message.Parameters.ServerToClientClipboard,
+            DriveRedirection = message.Parameters.DriveRedirection,
             CreatedAt = message.CreatedAt
         };
 

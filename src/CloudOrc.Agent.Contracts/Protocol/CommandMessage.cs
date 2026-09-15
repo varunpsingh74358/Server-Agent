@@ -4,9 +4,10 @@ namespace CloudOrc.Agent.Contracts.Protocol;
 
 /// <summary>
 /// Backend -> Agent: a command envelope. <see cref="CommandType"/> selects which executor
-/// handles <see cref="Parameters"/> - today only "powershell-exec" exists, but the shape
-/// leaves room for a future distinct <c>type</c> (e.g. FILE_UPLOAD) rather than growing
-/// this one envelope with unrelated parameter shapes.
+/// handles <see cref="Parameters"/> - CommandTypes.PowerShellExec and
+/// CommandTypes.RdpTransferPolicyApply today, with the shape leaving room for a future
+/// distinct <c>type</c> (e.g. FILE_UPLOAD) rather than growing this one envelope with
+/// unrelated parameter shapes.
 /// </summary>
 public sealed class CommandMessage
 {
@@ -29,12 +30,26 @@ public sealed class CommandMessage
     public required CommandParameters Parameters { get; init; }
 }
 
-/// <summary>Parameters for the "powershell-exec" <see cref="CommandMessage.CommandType"/>.</summary>
+/// <summary>
+/// Parameters carried by a <see cref="CommandMessage"/>. <see cref="Script"/> is used by
+/// CommandTypes.PowerShellExec; <see cref="ClientToServerClipboard"/>/<see cref="ServerToClientClipboard"/>/
+/// <see cref="DriveRedirection"/> are used by CommandTypes.RdpTransferPolicyApply instead -
+/// a command only ever populates the fields its own commandType defines.
+/// </summary>
 public sealed class CommandParameters
 {
     [JsonPropertyName("script")]
-    public required string Script { get; init; }
+    public string Script { get; init; } = string.Empty;
 
     [JsonPropertyName("timeoutSeconds")]
     public int? TimeoutSeconds { get; init; }
+
+    [JsonPropertyName("clientToServerClipboard")]
+    public string? ClientToServerClipboard { get; init; }
+
+    [JsonPropertyName("serverToClientClipboard")]
+    public string? ServerToClientClipboard { get; init; }
+
+    [JsonPropertyName("driveRedirection")]
+    public bool? DriveRedirection { get; init; }
 }

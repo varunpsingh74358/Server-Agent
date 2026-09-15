@@ -7,6 +7,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CloudOrc.ControlAgent.Tests.Services;
 
+// NOTE: every CommandProcessingService constructor call below passes a NoOpRdpTransferPolicyExecutor
+// - none of these pre-existing tests exercise the RDP transfer policy path. See
+// RoutesRdpTransferPolicyApplyCommands_ToTheRdpExecutor_NotPowerShell below for that coverage,
+// and RdpTransferPolicy/WindowsRdpTransferPolicyManagerTests.cs for the policy logic itself.
+
 /// <summary>
 /// Exercises the actual sequential pipeline in <see cref="CommandProcessingService"/> -
 /// queue drain, executor invocation, result sink fan-out, status publishing, and health
@@ -34,7 +39,7 @@ public sealed class CommandProcessingServiceTests
         var origin = new RecordingCommandSource();
         var health = new ControlAgentHealthState();
 
-        var service = new CommandProcessingService(queue, [sinkA, sinkB], statusPublisher, executor, health, NullLogger<CommandProcessingService>.Instance);
+        var service = new CommandProcessingService(queue, [sinkA, sinkB], statusPublisher, executor, new NoOpRdpTransferPolicyExecutor(), health, NullLogger<CommandProcessingService>.Instance);
 
         await queue.EnqueueAsync(CreateJob("cmd-1", "corr-1", origin), CancellationToken.None);
 
@@ -63,7 +68,7 @@ public sealed class CommandProcessingServiceTests
         var origin = new RecordingCommandSource();
         var health = new ControlAgentHealthState();
 
-        var service = new CommandProcessingService(queue, [sink], statusPublisher, timeline, health, NullLogger<CommandProcessingService>.Instance);
+        var service = new CommandProcessingService(queue, [sink], statusPublisher, timeline, new NoOpRdpTransferPolicyExecutor(), health, NullLogger<CommandProcessingService>.Instance);
 
         await queue.EnqueueAsync(CreateJob("cmd-a", null, origin), CancellationToken.None);
         await queue.EnqueueAsync(CreateJob("cmd-b", null, origin), CancellationToken.None);
@@ -102,7 +107,7 @@ public sealed class CommandProcessingServiceTests
         var origin = new RecordingCommandSource();
         var health = new ControlAgentHealthState();
 
-        var service = new CommandProcessingService(queue, [sink], statusPublisher, executor, health, NullLogger<CommandProcessingService>.Instance);
+        var service = new CommandProcessingService(queue, [sink], statusPublisher, executor, new NoOpRdpTransferPolicyExecutor(), health, NullLogger<CommandProcessingService>.Instance);
 
         await queue.EnqueueAsync(CreateJob("cmd-long", null, origin), CancellationToken.None);
         await service.StartAsync(CancellationToken.None);
@@ -123,6 +128,46 @@ public sealed class CommandProcessingServiceTests
 
         var distinctTimestamps = timestampsWhileRunning.Distinct().Count();
         Assert.True(distinctTimestamps >= 2, $"Expected the heartbeat loop to advance LastProcessingActivityAt at least twice while the 3s command ran; observed {distinctTimestamps} distinct value(s).");
+    }
+
+    [Fact]
+    public async Task ProcessOneAsync_RdpTransferPolicyApplyCommand_IsRoutedToRdpExecutor_NotPowerShell()
+    {
+        var queue = new InMemoryCommandQueue();
+        var sink = new RecordingResultSink();
+        var statusPublisher = new RecordingStatusPublisher();
+        var powerShellExecutor = new ScriptedExecutor(_ => throw new InvalidOperationException("PowerShell executor must never be invoked for an RDP transfer policy command."));
+        var rdpExecutor = new RecordingRdpTransferPolicyExecutor(CommandStatus.Partial, ["os=Fake build=1.0", "requiresNewSession=True"]);
+        var origin = new RecordingCommandSource();
+        var health = new ControlAgentHealthState();
+
+        var service = new CommandProcessingService(queue, [sink], statusPublisher, powerShellExecutor, rdpExecutor, health, NullLogger<CommandProcessingService>.Instance);
+
+        var job = new CommandJob
+        {
+            Request = new CommandRequest
+            {
+                CommandId = "rdp-1",
+                CommandType = CommandTypes.RdpTransferPolicyApply,
+                ClientToServerClipboard = "PLAIN_TEXT_ONLY",
+                ServerToClientClipboard = "PLAIN_TEXT_ONLY",
+                DriveRedirection = false
+            },
+            EffectiveTimeoutSeconds = 30,
+            SourceReference = "test:rdp-1",
+            OriginSource = origin
+        };
+        await queue.EnqueueAsync(job, CancellationToken.None);
+
+        await service.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => sink.Results.Count >= 1);
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Single(rdpExecutor.Requests);
+        Assert.Equal("rdp-1", rdpExecutor.Requests[0].CommandId);
+        Assert.Equal(CommandStatus.Partial, sink.Results[0].Status);
+        Assert.Contains("requiresNewSession=True", sink.Results[0].Output);
+        Assert.False(origin.Acknowledgements[0].Succeeded, "Partial is not a success for acknowledgement/health purposes.");
     }
 
     private static PowerShellExecutionOutcome SuccessOutcome(IReadOnlyList<string> output) => new()
@@ -206,6 +251,30 @@ public sealed class CommandProcessingServiceTests
             }
 
             return SuccessOutcome(["ok"]);
+        }
+    }
+
+    private sealed class NoOpRdpTransferPolicyExecutor : IRdpTransferPolicyExecutor
+    {
+        public Task<RdpTransferPolicyOutcome> ApplyAsync(CommandRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("Not used by these tests - none of them submit an RDP transfer policy command.");
+    }
+
+    private sealed class RecordingRdpTransferPolicyExecutor(CommandStatus status, IReadOnlyList<string> output) : IRdpTransferPolicyExecutor
+    {
+        public List<CommandRequest> Requests { get; } = [];
+
+        public Task<RdpTransferPolicyOutcome> ApplyAsync(CommandRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return Task.FromResult(new RdpTransferPolicyOutcome
+            {
+                Status = status,
+                StartedAt = DateTimeOffset.UtcNow,
+                CompletedAt = DateTimeOffset.UtcNow,
+                DurationMilliseconds = 0,
+                Output = output
+            });
         }
     }
 }

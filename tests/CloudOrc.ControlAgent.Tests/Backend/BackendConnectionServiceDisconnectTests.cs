@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using CloudOrc.Agent.Contracts.Abstractions;
 using CloudOrc.Agent.Contracts.Commands;
+using CloudOrc.Agent.Contracts.Execution;
 using CloudOrc.Agent.Contracts.Health;
 using CloudOrc.Agent.Contracts.Identity;
 using CloudOrc.ControlAgent.Backend;
@@ -159,6 +160,7 @@ public sealed class BackendConnectionServiceDisconnectTests
             [sink],
             new NullCommandStatusPublisher(),
             new PowerShellCommandExecutor(NullLogger<PowerShellCommandExecutor>.Instance),
+            new NoOpRdpTransferPolicyExecutor(),
             health,
             NullLogger<CommandProcessingService>.Instance);
 
@@ -204,6 +206,12 @@ public sealed class BackendConnectionServiceDisconnectTests
             throw new NotSupportedException("Not used by these tests - the job is enqueued directly.");
 
         public Task AcknowledgeAsync(CommandJob job, bool succeeded, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class NoOpRdpTransferPolicyExecutor : IRdpTransferPolicyExecutor
+    {
+        public Task<RdpTransferPolicyOutcome> ApplyAsync(CommandRequest request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("Not used by these tests - none of them submit an RDP transfer policy command.");
     }
 
     /// <summary>

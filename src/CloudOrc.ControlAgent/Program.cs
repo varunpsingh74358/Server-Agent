@@ -5,6 +5,7 @@ using CloudOrc.ControlAgent.Configuration;
 using CloudOrc.ControlAgent.Enrollment;
 using CloudOrc.ControlAgent.Health;
 using CloudOrc.ControlAgent.Identity;
+using CloudOrc.ControlAgent.RdpTransferPolicy;
 using CloudOrc.ControlAgent.Services;
 using CloudOrc.ControlAgent.Startup;
 using CloudOrc.ControlAgent.Telemetry;
@@ -127,6 +128,9 @@ builder.Services.AddSingleton<EnrolledStateStore>();
 builder.Services.AddSingleton<ControlAgentHealthState>();
 builder.Services.AddSingleton<ICommandQueue, InMemoryCommandQueue>();
 builder.Services.AddSingleton<IPowerShellExecutor, PowerShellCommandExecutor>();
+builder.Services.AddSingleton<IRdpOsBuildDetector, WindowsRdpOsBuildDetector>();
+builder.Services.AddSingleton<IRdpPolicyRegistryAccessor, WindowsRdpPolicyRegistryAccessor>();
+builder.Services.AddSingleton<IRdpTransferPolicyExecutor, WindowsRdpTransferPolicyManager>();
 
 if (controlAgentOptions.LocalFileModeEnabled)
 {

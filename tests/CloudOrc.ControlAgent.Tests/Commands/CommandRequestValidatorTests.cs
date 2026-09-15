@@ -109,4 +109,75 @@ public class CommandRequestValidatorTests
         Assert.Equal(30, result.EffectiveTimeoutSeconds);
         Assert.Null(result.Error);
     }
+
+    private static CommandRequest ValidRdpTransferRequest(
+        string? clientToServerClipboard = "PLAIN_TEXT_ONLY",
+        string? serverToClientClipboard = "PLAIN_TEXT_ONLY",
+        bool? driveRedirection = false) => new()
+    {
+        CommandId = "rdp-001",
+        CommandType = CommandTypes.RdpTransferPolicyApply,
+        ClientToServerClipboard = clientToServerClipboard,
+        ServerToClientClipboard = serverToClientClipboard,
+        DriveRedirection = driveRedirection,
+        TimeoutSeconds = 30
+    };
+
+    [Fact]
+    public void Validate_RdpTransferPolicyApply_ValidDesiredState_Succeeds()
+    {
+        var result = CommandRequestValidator.Validate(ValidRdpTransferRequest(), DefaultOptions);
+
+        Assert.True(result.IsValid);
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
+    public void Validate_RdpTransferPolicyApply_DoesNotRequireScript()
+    {
+        var request = ValidRdpTransferRequest();
+        Assert.Equal(string.Empty, request.Script);
+
+        var result = CommandRequestValidator.Validate(request, DefaultOptions);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Theory]
+    [InlineData("UNRESTRICTED")]
+    [InlineData("plain_text_only")]
+    [InlineData(null)]
+    public void Validate_RdpTransferPolicyApply_ClientToServerClipboardNotPlainTextOnly_IsRejected(string? value)
+    {
+        var request = ValidRdpTransferRequest(clientToServerClipboard: value);
+
+        var result = CommandRequestValidator.Validate(request, DefaultOptions);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("clientToServerClipboard", result.Error);
+    }
+
+    [Fact]
+    public void Validate_RdpTransferPolicyApply_ServerToClientClipboardNotPlainTextOnly_IsRejected()
+    {
+        var request = ValidRdpTransferRequest(serverToClientClipboard: "PLAIN_TEXT_AND_IMAGES");
+
+        var result = CommandRequestValidator.Validate(request, DefaultOptions);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("serverToClientClipboard", result.Error);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(null)]
+    public void Validate_RdpTransferPolicyApply_DriveRedirectionNotFalse_IsRejected(bool? value)
+    {
+        var request = ValidRdpTransferRequest(driveRedirection: value);
+
+        var result = CommandRequestValidator.Validate(request, DefaultOptions);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("driveRedirection", result.Error);
+    }
 }

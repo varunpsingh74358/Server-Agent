@@ -97,14 +97,36 @@ public class StaticSourceAuditTests
         Assert.True(offenders.Count == 0, "Found a WinRM/WSMan reference in: " + string.Join(", ", offenders));
     }
 
+    /// <summary>
+    /// Originally a blanket ban on any RDP/Remote Desktop reference anywhere in src/ or
+    /// installer/. The intent was always to keep this agent from growing an alternate
+    /// remote-access/command-execution transport (RDP or WinRM) alongside its one real
+    /// control channel (the WSS backend connection) - see the sibling
+    /// SourceCode_HasNoWinRMDependency test, which keeps that original, unrestricted
+    /// scope. CommandTypes.RdpTransferPolicyApply ("security.rdp.transfer.apply") and
+    /// src/CloudOrc.ControlAgent/RdpTransferPolicy/ are a deliberate, narrow exception:
+    /// they enforce RDP *session policy* (clipboard/drive redirection restrictions) via
+    /// Windows registry, the same mechanism Group Policy uses - they are not a remote
+    /// execution transport and do not touch BackendConnectionService's WSS-only command
+    /// channel. Everywhere else in src/ and installer/ remains fully covered.
+    /// </summary>
     [Fact]
-    public void SourceCode_HasNoRdpDependency()
+    public void SourceCode_HasNoRdpDependencyOutsideTransferPolicyFeature()
     {
+        var allowedRdpPathFragments = new[]
+        {
+            $"{Path.DirectorySeparatorChar}RdpTransferPolicy{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}CommandTypes.cs",
+            $"{Path.DirectorySeparatorChar}IRdpTransferPolicyExecutor.cs",
+            $"{Path.DirectorySeparatorChar}RdpTransferPolicyOutcome.cs",
+        };
+
         var offenders = ScannedFiles()
+            .Where(f => !allowedRdpPathFragments.Any(f.Path.Contains))
             .Where(f => Regex.IsMatch(f.Content, @"\bRDP\b", RegexOptions.IgnoreCase) || f.Content.Contains("Remote Desktop", StringComparison.OrdinalIgnoreCase))
             .Select(f => f.Path)
             .ToList();
-        Assert.True(offenders.Count == 0, "Found an RDP/Remote Desktop reference in: " + string.Join(", ", offenders));
+        Assert.True(offenders.Count == 0, "Found an RDP/Remote Desktop reference outside the RDP transfer policy feature in: " + string.Join(", ", offenders));
     }
 
     [Fact]

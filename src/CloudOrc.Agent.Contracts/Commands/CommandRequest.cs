@@ -27,4 +27,22 @@ public sealed class CommandRequest
 
     [JsonPropertyName("createdAt")]
     public DateTimeOffset? CreatedAt { get; init; }
+
+    // The following three properties are the desired-state payload for
+    // CommandTypes.RdpTransferPolicyApply only; they are unused (and should be left null)
+    // for CommandTypes.PowerShellExec. Kept as plain fields on the shared request rather
+    // than a nested object so LocalFileCommandSource's generic CommandRequest deserialization
+    // keeps working unchanged for every commandType.
+
+    /// <summary>Desired client-to-server clipboard redirection mode. Only "PLAIN_TEXT_ONLY" is currently accepted.</summary>
+    [JsonPropertyName("clientToServerClipboard")]
+    public string? ClientToServerClipboard { get; init; }
+
+    /// <summary>Desired server-to-client clipboard redirection mode. Only "PLAIN_TEXT_ONLY" is currently accepted.</summary>
+    [JsonPropertyName("serverToClientClipboard")]
+    public string? ServerToClientClipboard { get; init; }
+
+    /// <summary>Whether client drive redirection should be allowed. Only "false" (blocked) is currently accepted.</summary>
+    [JsonPropertyName("driveRedirection")]
+    public bool? DriveRedirection { get; init; }
 }

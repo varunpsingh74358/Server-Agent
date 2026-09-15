@@ -7,19 +7,26 @@ namespace CloudOrc.ControlAgent.Services;
 
 /// <summary>
 /// Hosted service that sequentially drains the <see cref="ICommandQueue"/>, executes each
-/// job through the generic <see cref="IPowerShellExecutor"/>, persists the result to
-/// every registered <see cref="ICommandResultSink"/> (today: local file, and when backend
-/// connectivity is enabled, WSS), and acknowledges the job back to whichever source
-/// produced it (<see cref="CommandJob.OriginSource"/>). "Sequentially" is a deliberate
-/// design choice for this first version - one <c>await foreach</c> over the queue, no
-/// parallel execution - so a single misbehaving command can never starve or race with
-/// another, regardless of which source it came from.
+/// job, persists the result to every registered <see cref="ICommandResultSink"/> (today:
+/// local file, and when backend connectivity is enabled, WSS), and acknowledges the job
+/// back to whichever source produced it (<see cref="CommandJob.OriginSource"/>).
+/// "Sequentially" is a deliberate design choice for this first version - one
+/// <c>await foreach</c> over the queue, no parallel execution - so a single misbehaving
+/// command can never starve or race with another, regardless of which source it came from.
+///
+/// Execution itself is routed by <see cref="CommandRequest.CommandType"/>: the generic
+/// <see cref="IPowerShellExecutor"/> handles CommandTypes.PowerShellExec exactly as before,
+/// and <see cref="IRdpTransferPolicyExecutor"/> handles CommandTypes.RdpTransferPolicyApply.
+/// The two paths never share code - IPowerShellExecutor still never sees a commandType or
+/// any field belonging only to the transfer-policy path, and is unaffected by this second
+/// path existing.
 /// </summary>
 public sealed class CommandProcessingService(
     ICommandQueue commandQueue,
     IEnumerable<ICommandResultSink> resultSinks,
     ICommandStatusPublisher statusPublisher,
     IPowerShellExecutor executor,
+    IRdpTransferPolicyExecutor rdpTransferPolicyExecutor,
     ControlAgentHealthState health,
     ILogger<CommandProcessingService> logger) : BackgroundService
 {
@@ -68,22 +75,9 @@ public sealed class CommandProcessingService(
         CommandResult result;
         try
         {
-            var outcome = await executor
-                .ExecuteAsync(job.Request.Script, TimeSpan.FromSeconds(job.EffectiveTimeoutSeconds), stoppingToken)
-                .ConfigureAwait(false);
-
-            result = new CommandResult
-            {
-                CommandId = commandId,
-                CorrelationId = correlationId,
-                Status = outcome.Status,
-                StartedAt = outcome.StartedAt,
-                CompletedAt = outcome.CompletedAt,
-                DurationMilliseconds = outcome.DurationMilliseconds,
-                Output = outcome.Output,
-                Error = outcome.Error,
-                ExitCode = outcome.ExitCode
-            };
+            result = string.Equals(job.Request.CommandType, CommandTypes.RdpTransferPolicyApply, StringComparison.Ordinal)
+                ? await ExecuteRdpTransferPolicyAsync(job, commandId, correlationId, stoppingToken).ConfigureAwait(false)
+                : await ExecutePowerShellAsync(job, commandId, correlationId, stoppingToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -129,6 +123,43 @@ public sealed class CommandProcessingService(
             "Command {CommandId} finished with status {Status} in {DurationMs}ms.{ErrorSuffix}",
             commandId, result.Status, result.DurationMilliseconds,
             result.Error is null ? string.Empty : $" Error: {result.Error}");
+    }
+
+    private async Task<CommandResult> ExecutePowerShellAsync(CommandJob job, string commandId, string? correlationId, CancellationToken stoppingToken)
+    {
+        var outcome = await executor
+            .ExecuteAsync(job.Request.Script, TimeSpan.FromSeconds(job.EffectiveTimeoutSeconds), stoppingToken)
+            .ConfigureAwait(false);
+
+        return new CommandResult
+        {
+            CommandId = commandId,
+            CorrelationId = correlationId,
+            Status = outcome.Status,
+            StartedAt = outcome.StartedAt,
+            CompletedAt = outcome.CompletedAt,
+            DurationMilliseconds = outcome.DurationMilliseconds,
+            Output = outcome.Output,
+            Error = outcome.Error,
+            ExitCode = outcome.ExitCode
+        };
+    }
+
+    private async Task<CommandResult> ExecuteRdpTransferPolicyAsync(CommandJob job, string commandId, string? correlationId, CancellationToken stoppingToken)
+    {
+        var outcome = await rdpTransferPolicyExecutor.ApplyAsync(job.Request, stoppingToken).ConfigureAwait(false);
+
+        return new CommandResult
+        {
+            CommandId = commandId,
+            CorrelationId = correlationId,
+            Status = outcome.Status,
+            StartedAt = outcome.StartedAt,
+            CompletedAt = outcome.CompletedAt,
+            DurationMilliseconds = outcome.DurationMilliseconds,
+            Output = outcome.Output,
+            Error = outcome.Error
+        };
     }
 
     private async Task PublishStatusAsync(string commandId, string? correlationId, CommandStatus status, CancellationToken stoppingToken)
