@@ -11,11 +11,13 @@ namespace CloudOrc.ControlAgent.Tests.RdpTransferPolicy;
 /// an unrecognized future build - can be asserted deterministically without needing a
 /// matching real machine for each one.
 ///
-/// <see cref="DetectCurrent_OnThisDevelopmentMachine_ReadsRealRegistryValues"/> is the one
-/// genuine integration test here: it reads (never writes) this machine's actual registry.
-/// It is safe to run anywhere because it is read-only, but its assertions are specific to
-/// this repo's own dev/CI environment (Windows Server 2019, build 17763) and would need
-/// updating if that environment ever changes.
+/// <see cref="DetectCurrent_OnAnyRealWindowsMachine_ReadsRegistryConsistentlyWithTheMatrix"/>
+/// is the one genuine integration test here: it reads (never writes) this machine's actual
+/// registry. It deliberately does NOT assert a specific build number - local dev boxes and
+/// hosted CI runners (e.g. GitHub Actions' "windows-latest") are not guaranteed to be the
+/// same Windows version/build, so it instead asserts internal consistency: whatever build
+/// this machine happens to be, DetectCurrent()'s verdict must match the same pure matrix
+/// function above, evaluated on that same build/UBR.
 /// </summary>
 public class WindowsRdpOsBuildDetectorTests
 {
@@ -38,14 +40,14 @@ public class WindowsRdpOsBuildDetectorTests
     }
 
     [Fact]
-    public void DetectCurrent_OnThisDevelopmentMachine_ReadsRealRegistryValues()
+    public void DetectCurrent_OnAnyRealWindowsMachine_ReadsRegistryConsistentlyWithTheMatrix()
     {
         var detector = new WindowsRdpOsBuildDetector(NullLogger<WindowsRdpOsBuildDetector>.Instance);
 
         var info = detector.DetectCurrent();
 
-        Assert.Equal(17763, info.Build);
-        Assert.False(info.SupportsDirectionalClipboard, "This repo's dev/CI environment is Windows Server 2019 (build 17763), which never supports the directional clipboard policy.");
+        Assert.True(info.Build > 0, "Expected a real CurrentBuildNumber to be readable from the registry on any Windows machine.");
         Assert.NotEmpty(info.ProductName);
+        Assert.Equal(WindowsRdpOsBuildDetector.SupportsDirectionalClipboard(info.Build, info.Ubr), info.SupportsDirectionalClipboard);
     }
 }
