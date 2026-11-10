@@ -134,6 +134,7 @@ public sealed partial class KopiaEngine : IBackupEngine
         var lastBytes = 0L;
         var lastAt = DateTimeOffset.UtcNow;
         long? uploaded = null;
+        ProgressCounts? counts = null;
 
         var run = await RunAsync(ctx,
             ["snapshot", "create", source.Path, "--json", $"--parallel={Math.Max(1, ctx.Budget.Parallelism).ToString(CultureInfo.InvariantCulture)}",
@@ -146,6 +147,7 @@ public sealed partial class KopiaEngine : IBackupEngine
                     return;
                 }
 
+                counts = ParseCounts(line) ?? counts;
                 uploaded = p.BytesUploaded ?? uploaded;
                 var now = DateTimeOffset.UtcNow;
                 double? rate = null;
@@ -166,7 +168,7 @@ public sealed partial class KopiaEngine : IBackupEngine
             return new SnapshotOutcome(false, failed.ReasonCode, failed.Message, TimedOut: run.TimedOut);
         }
 
-        return ParseSnapshotManifest(run.StdoutText, uploaded)
+        return ParseSnapshotManifest(run.StdoutText, uploaded, counts)
                ?? new SnapshotOutcome(false, BackupReasonCodes.EngineFailed, "kopia snapshot finished but its result could not be read.");
     }
 
@@ -299,7 +301,34 @@ public sealed partial class KopiaEngine : IBackupEngine
         return null;
     }
 
-    internal static SnapshotOutcome? ParseSnapshotManifest(string stdout, long? bytesUploaded)
+    /// <summary>Counters of the LAST Kopia progress line: hashed = new/changed files, cached = unchanged.</summary>
+    internal sealed record ProgressCounts(long Hashed, long HashedBytes, long Cached, long Uploaded);
+
+    internal static ProgressCounts? ParseCounts(string line)
+    {
+        var hashed = HashedPattern().Match(line);
+        var cached = CachedPattern().Match(line);
+        if (!hashed.Success && !cached.Success)
+        {
+            return null;
+        }
+
+        static long N(Match m) => m.Success && long.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0;
+        var uploaded = UploadedPattern().Match(line);
+        return new ProgressCounts(
+            N(hashed),
+            hashed.Success ? EngineErrorClassifier.ParseSize(hashed.Groups[2].Value) ?? 0 : 0,
+            N(cached),
+            uploaded.Success ? EngineErrorClassifier.ParseSize(uploaded.Groups[1].Value) ?? 0 : 0);
+    }
+
+    /// <summary>
+    /// Kopia 0.23's `snapshot create --json` prints the snapshot manifest only (rootEntry.summ: size,
+    /// files; no "stats" block), so new/changed vs unchanged come from the last progress line
+    /// (hashed vs cached). Its "uploaded" counter is printed before the final pack flush, so the bytes
+    /// of new data are reported as the larger of uploaded and hashed bytes (an upper bound after dedup).
+    /// </summary>
+    internal static SnapshotOutcome? ParseSnapshotManifest(string stdout, long? bytesUploaded, ProgressCounts? counts = null)
     {
         var json = ExtractJson(stdout, '{', '}');
         if (json is null)
@@ -338,6 +367,13 @@ public sealed partial class KopiaEngine : IBackupEngine
                 cached = Long(stats, "cachedFiles");
                 nonCached = Long(stats, "nonCachedFiles");
                 errorCount = Long(stats, "errorCount");
+            }
+
+            if (counts is not null)
+            {
+                nonCached ??= counts.Hashed;
+                cached ??= counts.Cached;
+                bytesUploaded = Math.Max(bytesUploaded ?? 0, Math.Max(counts.Uploaded, counts.HashedBytes));
             }
 
             return new SnapshotOutcome(true, null, null, id, rootObj, files, bytes, errors ?? errorCount ?? 0,

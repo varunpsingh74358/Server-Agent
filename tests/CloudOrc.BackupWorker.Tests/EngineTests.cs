@@ -45,6 +45,26 @@ public class KopiaParsingTests
 
     [Fact]
     public void SnapshotManifest_WithoutId_IsRejected() => Assert.Null(KopiaEngine.ParseSnapshotManifest("{\"rootEntry\":{}}", null));
+
+    /// <summary>Real Kopia 0.23.1 output captured on a Windows Server 2019 VPS (no "stats" block).</summary>
+    [Fact]
+    public void Kopia0231_RealOutput_ReportsChangedAndUnchangedFromTheProgressLine()
+    {
+        const string lastProgress = " * 0 hashing, 1 hashed (1 MB), 2 cached (3.1 MB), uploaded 217 B, estimating...";
+        const string stdout = """
+            {"id":"dfc1c9011ca50fe0fb492a139c9eb786","source":{"host":"win-fh5ojb00747","userName":"WIN-FH5OJB00747$","path":"C:\\Windows\\TEMP\\src"},"description":"","startTime":"2026-11-10T11:06:21.3206404Z","endTime":"2026-11-10T11:06:21.3427606Z","rootEntry":{"name":"src","type":"d","mode":"0777","mtime":"2026-11-10T11:06:21.0336083Z","obj":"k379446b48e27edc8438c09cd6f77b44d","summ":{"size":4194311,"files":3,"symlinks":0,"dirs":1,"maxTime":"2026-11-10T11:06:21.0336083Z","numFailed":0}}}
+            """;
+
+        var counts = KopiaEngine.ParseCounts(lastProgress);
+        var outcome = KopiaEngine.ParseSnapshotManifest(stdout, 217, counts)!;
+
+        Assert.True(outcome.Ok);
+        Assert.Equal(3, outcome.Files);
+        Assert.Equal(4194311, outcome.Bytes);
+        Assert.Equal(1, outcome.FilesChanged);
+        Assert.Equal(2, outcome.FilesUnchanged);
+        Assert.Equal(1_000_000, outcome.BytesUploaded); // the 1 MB of new data, not the pre-flush "217 B"
+    }
 }
 
 public class ResticPathTests
