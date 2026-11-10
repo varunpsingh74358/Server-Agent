@@ -98,6 +98,20 @@ public sealed class OutboxDispatcherServiceTests : IDisposable
         Assert.Equal(2, _received.Count);
     }
 
+    [Fact]
+    public async Task TunnelOffline404_IsRetried_NotParkedAsDead()
+    {
+        Enqueue("tunnel-1");
+        _statusByEvent["tunnel-1"] = 404;
+
+        var wait = await _dispatcher.DrainAsync(CancellationToken.None);
+
+        var head = _outbox.PeekHead(10);
+        Assert.Equal(["tunnel-1"], head.Select(i => i.EventId));
+        Assert.Equal(1, head[0].Attempts);
+        Assert.True(wait > TimeSpan.Zero);
+    }
+
     private void Enqueue(string id) => _outbox.Enqueue(new OutboxItem
     {
         EventId = id,
@@ -124,7 +138,17 @@ public sealed class OutboxDispatcherServiceTests : IDisposable
             var path = ctx.Request.Url!.AbsolutePath;
             _received.Enqueue((path, ctx.Request.Headers["Authorization"]));
             var id = path.Split('/')[^2];
-            ctx.Response.StatusCode = _statusByEvent.TryGetValue(id, out var status) ? status : 200;
+            var status = _statusByEvent.TryGetValue(id, out var s) ? s : 200;
+            ctx.Response.StatusCode = status;
+            if (status >= 400)
+            {
+                // The CloudOrc API answers errors with JSON; "tunnel-" ids imitate an offline tunnel (HTML).
+                var tunnel = id.StartsWith("tunnel-", StringComparison.Ordinal);
+                ctx.Response.ContentType = tunnel ? "text/html" : "application/json";
+                var bytes = System.Text.Encoding.UTF8.GetBytes(tunnel ? "<html>ERR_NGROK_3200 endpoint offline</html>" : """{"error":{"code":"REJECTED"}}""");
+                ctx.Response.OutputStream.Write(bytes);
+            }
+
             ctx.Response.Close();
         }
     }

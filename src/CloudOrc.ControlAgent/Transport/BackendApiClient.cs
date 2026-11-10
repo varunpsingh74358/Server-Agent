@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 namespace CloudOrc.ControlAgent.Transport;
 
 /// <summary>Outcome of one control-plane call. Never contains the request body or credentials.</summary>
-public sealed record ApiResponse(HttpStatusCode? StatusCode, string? Body, TimeSpan? RetryAfter, string? NetworkError)
+public sealed record ApiResponse(HttpStatusCode? StatusCode, string? Body, TimeSpan? RetryAfter, string? NetworkError, bool FromIntermediary = false)
 {
     public bool IsSuccess => StatusCode is { } s && (int)s is >= 200 and < 300;
 
@@ -19,10 +19,22 @@ public sealed record ApiResponse(HttpStatusCode? StatusCode, string? Body, TimeS
 
     public bool IsNetworkFailure => NetworkError is not null;
 
-    /// <summary>Worth retrying later: network, timeout, 408, 425, 429, 5xx, and 401 (renewal may fix it).</summary>
+    /// <summary>
+    /// Worth retrying later: network, timeout, 408, 425, 429, 5xx, 401 (renewal may fix it), and any
+    /// 4xx that did not come from the CloudOrc API itself - a tunnel/proxy/load balancer answering for
+    /// an offline backend (e.g. ngrok "endpoint offline" 404) says nothing about the request (§8).
+    /// </summary>
     public bool IsTransient => IsNetworkFailure
         || StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests or HttpStatusCode.Unauthorized or (HttpStatusCode)425
-        || (StatusCode is { } s && (int)s >= 500);
+        || (StatusCode is { } s && (int)s >= 500)
+        || (FromIntermediary && StatusCode is { } p && (int)p >= 400);
+
+    /// <summary>
+    /// True when an error response was not produced by the CloudOrc API: the API always answers errors
+    /// with JSON, tunnels/proxies answer with HTML/text or mark themselves (ngrok-error-code header).
+    /// </summary>
+    public static bool LooksLikeIntermediary(int statusCode, string? mediaType, bool hasProxyErrorHeader) =>
+        statusCode >= 400 && (hasProxyErrorHeader || mediaType is null || !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase));
 
     public T? Read<T>(JsonSerializerOptions options) where T : class =>
         string.IsNullOrWhiteSpace(Body) ? null : JsonSerializer.Deserialize<T>(Body, options);
@@ -140,7 +152,11 @@ public sealed class BackendApiClient : IDisposable
                 body = body[..(64 * 1024)];
             }
 
-            return new ApiResponse(response.StatusCode, body, RetryAfter.FromResponse(response, _time.GetUtcNow()), null);
+            var fromIntermediary = ApiResponse.LooksLikeIntermediary(
+                (int)response.StatusCode,
+                response.Content.Headers.ContentType?.MediaType,
+                response.Headers.Contains("ngrok-error-code"));
+            return new ApiResponse(response.StatusCode, body, RetryAfter.FromResponse(response, _time.GetUtcNow()), null, fromIntermediary);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
