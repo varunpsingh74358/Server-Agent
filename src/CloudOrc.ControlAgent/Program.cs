@@ -124,10 +124,22 @@ var backendOptions =
 
 // Directories must exist before Serilog's file sink (below) tries to write into logs\.
 DirectoryBootstrapper.EnsureDirectories(controlAgentOptions);
+// Restrict the data directory to SYSTEM + Administrators. Windows re-applies the new DACL to every
+// file below it, which takes minutes on a data directory full of files from an older agent - so it
+// never blocks startup (the service must report "started" within the SCM timeout): it is skipped
+// when already applied and otherwise runs in the background. Local command files stay refused
+// until then (LocalFileCommandSource checks the ACL before executing anything).
 if (OperatingSystem.IsWindows() && controlAgentOptions.HardenDataDirectoryAcl
-    && DataDirectoryAcl.Harden(controlAgentOptions.DataDirectory) is { } aclError)
+    && !DataDirectoryAcl.IsHardened(controlAgentOptions.DataDirectory))
 {
-    Console.Error.WriteLine($"WARNING: could not restrict {controlAgentOptions.DataDirectory} to SYSTEM and Administrators: {aclError}");
+    var dataDirectory = controlAgentOptions.DataDirectory;
+    _ = Task.Run(() =>
+    {
+        if (DataDirectoryAcl.Harden(dataDirectory) is { } aclError)
+        {
+            Console.Error.WriteLine($"WARNING: could not restrict {dataDirectory} to SYSTEM and Administrators: {aclError}");
+        }
+    });
 }
 
 // If this agent has been enrolled, the persisted, backend-issued BackendUrl always wins

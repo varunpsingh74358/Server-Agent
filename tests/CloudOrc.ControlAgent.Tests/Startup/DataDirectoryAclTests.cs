@@ -59,6 +59,20 @@ public sealed class DataDirectoryAclTests : IDisposable
     }
 
     [Fact]
+    public void IsHardened_IsFalseBeforeHarden_AndTrueAfter_SoLaterStartsSkipTheSlowTreeRewrite()
+    {
+        Directory.CreateDirectory(_root);
+        Assert.False(DataDirectoryAcl.IsHardened(_root));
+        Assert.False(DataDirectoryAcl.IsHardened(Path.Combine(_root, "missing")));
+
+        Assert.Null(DataDirectoryAcl.Harden(_root));
+        Assert.True(DataDirectoryAcl.IsHardened(_root));
+
+        GrantUsersWrite(_root);
+        Assert.False(DataDirectoryAcl.IsHardened(_root));
+    }
+
+    [Fact]
     public void UsersWriteAccess_IsDetected()
     {
         DataDirectoryAcl.Harden(_root);

@@ -37,6 +37,28 @@ public static class DataDirectoryAcl
         }
     }
 
+    /// <summary>
+    /// True when the directory already has the protected SYSTEM + Administrators DACL, so the (slow,
+    /// whole-tree) <see cref="Harden"/> can be skipped on every later start.
+    /// </summary>
+    public static bool IsHardened(string directory)
+    {
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                return false;
+            }
+
+            var acl = new DirectoryInfo(directory).GetAccessControl();
+            return acl.AreAccessRulesProtected && IsWritableOnlyByPrivileged(directory, out _);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     private const FileSystemRights WriteRights =
         FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.WriteExtendedAttributes |
         FileSystemRights.WriteAttributes | FileSystemRights.Delete | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
