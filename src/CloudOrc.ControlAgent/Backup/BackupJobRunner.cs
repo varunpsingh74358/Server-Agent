@@ -273,6 +273,11 @@ public sealed class BackupJobRunner(
                 case BackupJobStates.Cancelled:
                     Finish(job, BackupJobStates.Cancelled, BackupReasonCodes.Cancelled, result.Message ?? "Cancelled.", CancelledEvent(job), result.Summary);
                     break;
+                // A worker stopped by a cancel request reports Failed/CANCELLED: that is a user cancel
+                // (state CANCELLED, never retried), not a failure.
+                case BackupJobStates.Failed when result.ReasonCode == BackupReasonCodes.Cancelled || jobs.Get(job.JobId)?.CancelRequested == true:
+                    Finish(job, BackupJobStates.Cancelled, BackupReasonCodes.Cancelled, "Cancelled.", CancelledEvent(job), result.Summary);
+                    break;
                 default:
                     RetryOrFail(job, result.ReasonCode ?? BackupReasonCodes.EngineFailed, result.Message ?? "Job failed.", summary: result.Summary);
                     break;
