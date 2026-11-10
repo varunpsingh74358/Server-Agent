@@ -205,14 +205,39 @@ public sealed partial class KopiaEngine : IBackupEngine
 
         var source = string.IsNullOrEmpty(relativePath) ? root : $"{root}/{relativePath.Replace('\\', '/').TrimStart('/')}";
         var destination = string.IsNullOrEmpty(relativePath) ? targetPath : Path.Combine(targetPath, relativePath);
+
+        if (mode == RestoreModes.SkipExisting)
+        {
+            // Kopia 0.23 has no "keep what exists" mode: --skip-existing still overwrites changed files
+            // and --no-overwrite-files aborts on the first existing file (verified on Windows Server).
+            // Restore into a fresh staging folder on the same volume, then move in only what is missing.
+            var stagingDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(destination)) ?? targetPath, $".cloudorc-restore-{Guid.NewGuid():N}");
+            var staged = Path.Combine(stagingDir, Path.GetFileName(Path.TrimEndingDirectorySeparator(destination)));
+            try
+            {
+                var stage = await RunAsync(ctx,
+                    ["snapshot", "restore", source, staged, $"--parallel={Math.Max(1, ctx.Budget.Parallelism).ToString(CultureInfo.InvariantCulture)}", "--skip-owners", "--no-overwrite-symlinks", "--no-overwrite-files"],
+                    ct).ConfigureAwait(false);
+                if (stage.ExitCode != 0)
+                {
+                    var stageFailed = EngineErrorClassifier.FromRun("kopia", "restore", stage);
+                    return new RestoreOutcome(false, stageFailed.ReasonCode, stageFailed.Message);
+                }
+
+                MergeSkipExisting(staged, destination);
+                return new RestoreOutcome(true, null, null);
+            }
+            finally
+            {
+                try { if (Directory.Exists(stagingDir)) Directory.Delete(stagingDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+        }
+
         var args = new List<string> { "snapshot", "restore", source, destination,$"--parallel={Math.Max(1, ctx.Budget.Parallelism).ToString(CultureInfo.InvariantCulture)}", "--skip-owners", "--no-overwrite-symlinks" };
         switch (mode)
         {
             case RestoreModes.Overwrite:
                 args.AddRange(["--overwrite-files", "--overwrite-directories", "--write-files-atomically"]);
-                break;
-            case RestoreModes.SkipExisting:
-                args.AddRange(["--skip-existing", "--no-overwrite-files"]);
                 break;
             default: // rename: target is a fresh directory, never existing data
                 args.Add("--no-overwrite-files");
@@ -227,6 +252,52 @@ public sealed partial class KopiaEngine : IBackupEngine
 
         var failed = EngineErrorClassifier.FromRun("kopia", "restore", run);
         return new RestoreOutcome(false, failed.ReasonCode, failed.Message);
+    }
+
+    /// <summary>
+    /// "skip-existing" restore: moves every staged file whose target does not exist yet into place
+    /// (creating folders as needed) and leaves every existing file untouched. Returns (moved, kept).
+    /// </summary>
+    internal static (int Moved, int Kept) MergeSkipExisting(string staged, string destination)
+    {
+        if (File.Exists(staged))
+        {
+            if (File.Exists(destination) || Directory.Exists(destination))
+            {
+                return (0, 1);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destination))!);
+            File.Move(staged, destination);
+            return (1, 0);
+        }
+
+        if (!Directory.Exists(staged))
+        {
+            return (0, 0);
+        }
+
+        int moved = 0, kept = 0;
+        Directory.CreateDirectory(destination);
+        foreach (var dir in Directory.EnumerateDirectories(staged, "*", SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(staged, dir)));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(staged, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(destination, Path.GetRelativePath(staged, file));
+            if (File.Exists(target) || Directory.Exists(target))
+            {
+                kept++;
+                continue;
+            }
+
+            File.Move(file, target);
+            moved++;
+        }
+
+        return (moved, kept);
     }
 
     public async Task<EngineOutcome> MaintenanceAsync(EngineContext ctx, bool full, BackupRetention? retention, CancellationToken ct)

@@ -46,6 +46,35 @@ public class KopiaParsingTests
     [Fact]
     public void SnapshotManifest_WithoutId_IsRejected() => Assert.Null(KopiaEngine.ParseSnapshotManifest("{\"rootEntry\":{}}", null));
 
+    [Fact]
+    public void SkipExisting_Merge_KeepsExistingFiles_AndBringsBackOnlyMissingOnes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "cloudorc-skip-" + Guid.NewGuid().ToString("N"));
+        var staged = Path.Combine(root, "staged");
+        var target = Path.Combine(root, "target");
+        Directory.CreateDirectory(Path.Combine(staged, "sub"));
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(staged, "a.txt"), "BACKUP-A");
+        File.WriteAllText(Path.Combine(staged, "sub", "b.txt"), "BACKUP-B");
+        File.WriteAllText(Path.Combine(target, "a.txt"), "LOCAL-CHANGE");
+        try
+        {
+            var (moved, kept) = KopiaEngine.MergeSkipExisting(staged, target);
+
+            Assert.Equal((1, 1), (moved, kept));
+            Assert.Equal("LOCAL-CHANGE", File.ReadAllText(Path.Combine(target, "a.txt")));
+            Assert.Equal("BACKUP-B", File.ReadAllText(Path.Combine(target, "sub", "b.txt")));
+
+            // single file selection
+            File.WriteAllText(Path.Combine(root, "one.txt.staged"), "X");
+            Assert.Equal((0, 1), KopiaEngine.MergeSkipExisting(Path.Combine(root, "one.txt.staged"), Path.Combine(target, "a.txt")));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     /// <summary>Real Kopia 0.23.1 output captured on a Windows Server 2019 VPS (no "stats" block).</summary>
     [Fact]
     public void Kopia0231_RealOutput_ReportsChangedAndUnchangedFromTheProgressLine()
