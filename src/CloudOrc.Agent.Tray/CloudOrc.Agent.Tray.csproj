@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Optional per-user tray/status app (CO-DEV-BKP-001 §4 local UI contract). Runs in the
+    interactive user session - never inside the Windows service (Session 0 has no tray).
+    Deliberately has NO ProjectReference to CloudOrc.Agent.Contracts: the handful of local
+    status DTOs are duplicated in Protocol/LocalStatusProtocol.cs so this tiny UI stays
+    independent of the agent core assemblies. Keep those DTOs in sync with
+    src/CloudOrc.Agent.Contracts/Backup/WorkerProtocol.cs.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CloudOrc.Agent.Tray</RootNamespace>
+    <AssemblyName>CloudOrc.Agent.Tray</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CloudOrc.Agent.Tray.Tests" />
+  </ItemGroup>
+
+</Project>

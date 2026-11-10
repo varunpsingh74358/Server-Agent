@@ -19,6 +19,12 @@
 ;   --version                    Print installer name/version and exit 0 - no UI, no
 ;                                 install action. See PrintVersionAndExitIfRequested below.
 ;   --token "ENR-..."            One-time enrollment token - see GetTokenParam below.
+;   --code ABCD-1234             Activation code for an external / backup-only device
+;                                 (CO-DEV-BKP-001 section 4). Needs --api-base (below) or an
+;                                 earlier one persisted in activation.json.
+;   --api-base https://...       CloudOrc control-plane address used for activation codes and
+;                                 by the tray's "Activate" screen. Persisted (not a secret).
+;   --portal-url https://...     Optional portal link shown by the tray.
 ;   --force-downgrade            Allow installing an older version over a newer one - see
 ;                                 CheckDowngradeProtection below. Never required for a
 ;                                 same-or-newer version, i.e. a normal upgrade.
@@ -36,6 +42,18 @@
 #endif
 #ifndef WatchdogAgentSourceDir
   #define WatchdogAgentSourceDir "..\dist\CloudOrcAgents-win-x64\WatchdogAgent"
+#endif
+#ifndef BackupWorkerSourceDir
+  #define BackupWorkerSourceDir "..\dist\CloudOrcAgents-win-x64\BackupWorker"
+#endif
+#ifndef EnginesSourceDir
+  #define EnginesSourceDir "..\dist\CloudOrcAgents-win-x64\Engines"
+#endif
+#ifndef UpdaterSourceDir
+  #define UpdaterSourceDir "..\dist\CloudOrcAgents-win-x64\Updater"
+#endif
+#ifndef TraySourceDir
+  #define TraySourceDir "..\dist\CloudOrcAgents-win-x64\Tray"
 #endif
 
 #define MyAppName "CloudOrc Agent"
@@ -80,8 +98,11 @@ WizardStyle=modern
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Components]
-Name: "controlagent"; Description: "CloudOrc Control Agent"; Types: full custom
+Name: "controlagent"; Description: "CloudOrc Control Agent (incl. backup worker, engines and signed updater)"; Types: full custom
 Name: "watchdogagent"; Description: "CloudOrc Watchdog Agent"; Types: full custom
+; Optional desktop status icon (CO-DEV-BKP-001 section 4). Off by default: headless servers
+; need no UI dependency at all.
+Name: "tray"; Description: "CloudOrc status icon for signed-in users (optional)"; Types: custom
 
 [Types]
 Name: "full"; Description: "Full installation (Control Agent + Watchdog Agent)"
@@ -90,6 +111,22 @@ Name: "custom"; Description: "Custom installation"; Flags: iscustom
 [Files]
 Source: "{#ControlAgentSourceDir}\*"; DestDir: "{app}\ControlAgent"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: controlagent
 Source: "{#WatchdogAgentSourceDir}\*"; DestDir: "{app}\WatchdogAgent"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: watchdogagent
+; Isolated backup worker + pinned engine binaries (kopia/restic/rclone + engines.manifest.json
+; with their SHA-256). Engines are optional in a dev build: without them the agent simply does
+; not advertise the backup capability.
+Source: "{#BackupWorkerSourceDir}\*"; DestDir: "{app}\BackupWorker"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: controlagent
+Source: "{#EnginesSourceDir}\*"; DestDir: "{app}\Engines"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: controlagent
+Source: "{#UpdaterSourceDir}\*"; DestDir: "{app}\Updater"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: controlagent
+Source: "{#TraySourceDir}\*"; DestDir: "{app}\Tray"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Components: tray
+
+[Registry]
+; Start the status icon for every user who signs in (only when the tray component is chosen).
+Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "CloudOrcAgentTray"; ValueData: """{app}\Tray\CloudOrc.Agent.Tray.exe"""; Flags: uninsdeletevalue; Components: tray
+; cloudorc://activate?code=... deep links from the portal (section 4 "approves deep link"). The
+; tray always asks the user to approve before activating.
+Root: HKLM; Subkey: "SOFTWARE\Classes\cloudorc"; ValueType: string; ValueName: ""; ValueData: "URL:CloudOrc activation"; Flags: uninsdeletekey; Components: tray
+Root: HKLM; Subkey: "SOFTWARE\Classes\cloudorc"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Components: tray
+Root: HKLM; Subkey: "SOFTWARE\Classes\cloudorc\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Tray\CloudOrc.Agent.Tray.exe"" ""%1"""; Components: tray
 
 [Code]
 var
@@ -461,6 +498,58 @@ begin
   end;
 end;
 
+// Generic "--name value" / "--name=value" / "/NAME=value" reader for the backup-era
+// parameters below. Returns '' when absent.
+function GetNamedParam(Name: String): String;
+var
+  i: Integer;
+  p, upperP, upperName: String;
+begin
+  Result := '';
+  upperName := Uppercase(Name);
+  for i := 1 to ParamCount do
+  begin
+    p := ParamStr(i);
+    upperP := Uppercase(p);
+    if (upperP = '--' + upperName) and (i < ParamCount) then
+    begin
+      Result := ParamStr(i + 1);
+      Exit;
+    end;
+    if Copy(upperP, 1, Length(upperName) + 3) = '--' + upperName + '=' then
+    begin
+      Result := Copy(p, Length(upperName) + 4, MaxInt);
+      Exit;
+    end;
+    if Copy(upperP, 1, Length(upperName) + 2) = '/' + upperName + '=' then
+    begin
+      Result := Copy(p, Length(upperName) + 3, MaxInt);
+      Exit;
+    end;
+  end;
+end;
+
+// Persists the activation endpoint (not a secret) through the agent's own CLI, which
+// validates it is https:// before writing ProgramData\CloudOrc\ControlAgent\activation.json.
+function RunSetActivation(ControlAgentExe, ApiBase, PortalUrl: String): Boolean;
+var
+  ResultCode: Integer;
+  Args: String;
+begin
+  Args := 'set-activation --api-base "' + ApiBase + '"';
+  if PortalUrl <> '' then
+    Args := Args + ' --portal-url "' + PortalUrl + '"';
+  Result := Exec(ControlAgentExe, Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+function RunCodeEnrollment(ControlAgentExe, Code: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ControlAgentExe, 'enroll --code "' + Code + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    and (ResultCode = 0);
+end;
+
 // Shells out to the just-deployed Control Agent's own `enroll` CLI mode (see
 // EnrollmentCommandLine.cs) rather than reimplementing HTTP/JSON in Pascal Script - the
 // .NET side already has a real HttpClient and does the actual token decode + POST +
@@ -499,7 +588,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   controlAgentExe, watchdogExe: String;
   controlAgentDir, watchdogDir: String;
-  token: String;
+  token, activationCode, apiBase, portalUrl: String;
 begin
   controlAgentDir := ExpandConstant('{app}\ControlAgent');
   watchdogDir := ExpandConstant('{app}\WatchdogAgent');
@@ -546,6 +635,26 @@ begin
         if not RunEnrollment(controlAgentExe, token) then
           FailInstall('Enrollment failed - the Control Agent could not be enrolled with the supplied token. Check the token and try again; see C:\ProgramData\CloudOrc\ControlAgent\logs\ for details.', 20);
         Log('Enrollment succeeded.');
+      end;
+
+      // External / backup-only device: persist the activation endpoint, then (optionally)
+      // redeem an activation code. Without --code the device is activated later from the
+      // tray or `CloudOrc.ControlAgent.exe enroll --code ...`.
+      apiBase := GetNamedParam('api-base');
+      portalUrl := GetNamedParam('portal-url');
+      if apiBase <> '' then
+      begin
+        if not RunSetActivation(controlAgentExe, apiBase, portalUrl) then
+          FailInstall('The --api-base value was rejected (it must be an https:// address).', 2);
+      end;
+
+      activationCode := GetNamedParam('code');
+      if (activationCode <> '') and (token = '') then
+      begin
+        Log('Activation code supplied - activating before starting services.');
+        if not RunCodeEnrollment(controlAgentExe, activationCode) then
+          FailInstall('Activation failed - the code may be wrong, expired or already used. Create a new code in the CloudOrc portal; see C:\ProgramData\CloudOrc\ControlAgent\logs\ for details.', 20);
+        Log('Activation succeeded.');
       end;
 
       InstallOrUpdateService('{#ControlAgentServiceName}', 'CloudOrc Control Agent',

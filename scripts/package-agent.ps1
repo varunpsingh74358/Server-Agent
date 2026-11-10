@@ -170,6 +170,10 @@ $packageName = "CloudOrcAgents-win-x64"
 $packageRoot = Join-Path $OutputRoot $packageName
 $controlAgentOut = Join-Path $packageRoot "ControlAgent"
 $watchdogAgentOut = Join-Path $packageRoot "WatchdogAgent"
+$backupWorkerOut = Join-Path $packageRoot "BackupWorker"
+$updaterOut = Join-Path $packageRoot "Updater"
+$trayOut = Join-Path $packageRoot "Tray"
+$enginesOut = Join-Path $packageRoot "Engines"
 New-Item -ItemType Directory -Force -Path $controlAgentOut | Out-Null
 New-Item -ItemType Directory -Force -Path $watchdogAgentOut | Out-Null
 
@@ -190,6 +194,36 @@ Step "dotnet publish Watchdog Agent (win-x64, self-contained)"
 & dotnet publish "$watchdogAgentProject" -c $Configuration -r win-x64 --self-contained true -p:PublishSingleFile=false @versionArgs -o "$watchdogAgentOut"
 if ($LASTEXITCODE -ne 0) { Fail "Publishing Watchdog Agent failed (exit code $LASTEXITCODE)." }
 
+# CO-DEV-BKP-001: isolated backup worker, signed self-updater, optional tray status app.
+$backupWorkerProject = Join-Path $repoRoot "src\CloudOrc.BackupWorker\CloudOrc.BackupWorker.csproj"
+$updaterProject = Join-Path $repoRoot "src\CloudOrc.Agent.Updater\CloudOrc.Agent.Updater.csproj"
+$trayProject = Join-Path $repoRoot "src\CloudOrc.Agent.Tray\CloudOrc.Agent.Tray.csproj"
+
+Step "dotnet publish Backup Worker (win-x64, self-contained)"
+& dotnet publish "$backupWorkerProject" -c $Configuration -r win-x64 --self-contained true -p:PublishSingleFile=false @versionArgs -o "$backupWorkerOut"
+if ($LASTEXITCODE -ne 0) { Fail "Publishing Backup Worker failed (exit code $LASTEXITCODE)." }
+
+Step "dotnet publish Updater (win-x64, self-contained)"
+& dotnet publish "$updaterProject" -c $Configuration -r win-x64 --self-contained true -p:PublishSingleFile=false @versionArgs -o "$updaterOut"
+if ($LASTEXITCODE -ne 0) { Fail "Publishing Updater failed (exit code $LASTEXITCODE)." }
+
+Step "dotnet publish Tray status app (win-x64, self-contained)"
+& dotnet publish "$trayProject" -c $Configuration -r win-x64 --self-contained true -p:PublishSingleFile=false @versionArgs -o "$trayOut"
+if ($LASTEXITCODE -ne 0) { Fail "Publishing Tray failed (exit code $LASTEXITCODE)." }
+
+# Engine binaries are third-party (Kopia / Restic / rclone). They are fetched and SHA-256
+# verified by scripts\fetch-engines.ps1 into engines\dist\ (which also writes the
+# engines.manifest.json the worker re-verifies before every launch). Without them the agent
+# still installs and runs - it just does not advertise the "backup.v1" capability.
+$enginesSource = Join-Path $repoRoot "engines\dist"
+if (Test-Path (Join-Path $enginesSource "engines.manifest.json")) {
+    Step "Copying pinned backup engines"
+    New-Item -ItemType Directory -Force -Path $enginesOut | Out-Null
+    Copy-Item -Path (Join-Path $enginesSource "*") -Destination $enginesOut -Recurse -Force
+} else {
+    Write-Host "`n>>> engines\dist\engines.manifest.json not found - packaging WITHOUT backup engines (run scripts\fetch-engines.ps1 first)." -ForegroundColor Yellow
+}
+
 # ----------------------------------------------------------------------------
 # 4. Verify the published output before packaging it - never trust a zero exit
 #    code alone.
@@ -203,6 +237,14 @@ if (-not (Test-Path $controlAgentExe)) { Fail "CloudOrc.ControlAgent.exe not fou
 if (-not (Test-Path $watchdogAgentExe)) { Fail "CloudOrc.WatchdogAgent.exe not found at '$watchdogAgentExe'." }
 Write-Host "  Control Agent EXE:  OK"
 Write-Host "  Watchdog Agent EXE: OK"
+
+foreach ($exe in @(
+        (Join-Path $backupWorkerOut "CloudOrc.BackupWorker.exe"),
+        (Join-Path $updaterOut "CloudOrc.Agent.Updater.exe"),
+        (Join-Path $trayOut "CloudOrc.Agent.Tray.exe"))) {
+    if (-not (Test-Path $exe)) { Fail "'$exe' was not published." }
+}
+Write-Host "  Backup Worker / Updater / Tray EXEs: OK"
 
 foreach ($dir in @($controlAgentOut, $watchdogAgentOut)) {
     if (-not (Test-Path (Join-Path $dir "hostfxr.dll"))) { Fail "'$dir' is missing hostfxr.dll - this is not a self-contained publish." }

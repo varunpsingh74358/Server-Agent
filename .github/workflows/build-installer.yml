@@ -59,12 +59,31 @@ jobs:
       # The exact same $version string feeds both the .NET assemblies (-Version below) and
       # the installer's own AppVersion (/DMyAppVersion= further down) - one parsed value,
       # not two independently-maintained ones, per the single-source-of-truth requirement.
+      # CO-DEV-BKP-001: the pinned backup engines (engines/engines.lock.json) are downloaded and
+      # SHA-256-verified here so every release ships them; package-agent.ps1 copies engines\dist.
+      - name: Fetch pinned backup engines
+        shell: pwsh
+        run: ./scripts/fetch-engines.ps1
+
       - name: Publish both agents (self-contained win-x64)
         shell: pwsh
         # Tests already ran as their own step above - skip re-running them here. This
         # reuses the existing package-agent.ps1 (dotnet publish + verification) rather
         # than duplicating publish logic in the workflow.
         run: ./scripts/package-agent.ps1 -SkipTests -Version "${{ steps.version.outputs.version }}"
+
+      # CO-DEV-BKP-001 section 13/15: the self-updater refuses unsigned installers. Signing runs
+      # whenever the certificate secret is configured; set the repository variable
+      # REQUIRE_CODE_SIGNING=true to make a missing certificate fail release builds.
+      - name: Sign CloudOrc binaries
+        shell: pwsh
+        env:
+          CODE_SIGNING_PFX_BASE64: ${{ secrets.CODE_SIGNING_PFX_BASE64 }}
+          CODE_SIGNING_PFX_PASSWORD: ${{ secrets.CODE_SIGNING_PFX_PASSWORD }}
+          CODE_SIGNING_TIMESTAMP_URL: ${{ secrets.CODE_SIGNING_TIMESTAMP_URL }}
+        run: |
+          $required = "${{ vars.REQUIRE_CODE_SIGNING }}" -eq "true"
+          ./scripts/sign-artifacts.ps1 -Path dist\CloudOrcAgents-win-x64 -Required:$required
 
       - name: Ensure Inno Setup is available
         shell: pwsh
@@ -85,6 +104,16 @@ jobs:
         run: |
           & $env:ISCC_PATH "/DMyAppVersion=${{ steps.version.outputs.version }}" installer\CloudOrcAgentSetup.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC compile failed with exit code $LASTEXITCODE" }
+
+      - name: Sign installer
+        shell: pwsh
+        env:
+          CODE_SIGNING_PFX_BASE64: ${{ secrets.CODE_SIGNING_PFX_BASE64 }}
+          CODE_SIGNING_PFX_PASSWORD: ${{ secrets.CODE_SIGNING_PFX_PASSWORD }}
+          CODE_SIGNING_TIMESTAMP_URL: ${{ secrets.CODE_SIGNING_TIMESTAMP_URL }}
+        run: |
+          $required = "${{ vars.REQUIRE_CODE_SIGNING }}" -eq "true"
+          ./scripts/sign-artifacts.ps1 -Path installer\Output\CloudOrcAgentSetup.exe -Required:$required
 
       - name: Verify installer output
         shell: pwsh

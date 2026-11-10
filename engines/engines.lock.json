@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Pinned third-party backup engines (CO-DEV-BKP-001 section 0 / ADR-01). Fill url + sha256 for",
+    "each engine from the vendor's OFFICIAL release page after the M0 benchmark picks versions.",
+    "scripts/fetch-engines.ps1 downloads each archive, refuses any SHA-256 mismatch, extracts the",
+    "exe and writes engines/dist/engines.manifest.json with the SHA-256 of the exe itself - the",
+    "worker re-verifies that hash before every launch and fails closed on mismatch (section 15).",
+    "Leave an engine's url empty to skip it (the agent only advertises backup.v1 if at least",
+    "kopia or restic is present; Google Drive repositories also need rclone).",
+    "kopia/rclone sha256 = the archive hash published in the vendor's checksums.txt / SHA256SUMS."
+  ],
+  "engines": [
+    { "name": "kopia",  "version": "0.23.1", "url": "https://github.com/kopia/kopia/releases/download/v0.23.1/kopia-0.23.1-windows-x64.zip", "sha256": "f0369d9657dbe47a1b8b6ff4e308c5958a4813b405d4e32ae9d81b3f2b3d8251", "exe": "kopia.exe" },
+    { "name": "restic", "version": "", "url": "", "sha256": "", "exe": "restic.exe" },
+    { "name": "rclone", "version": "1.76.0", "url": "https://github.com/rclone/rclone/releases/download/v1.76.0/rclone-v1.76.0-windows-amd64.zip", "sha256": "8b4fd2737ade4e70c057ef4a49deb7cffe94b0fb9d7587c189d149823f21a1dc", "exe": "rclone.exe" }
+  ]
+}

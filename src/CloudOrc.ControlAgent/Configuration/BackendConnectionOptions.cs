@@ -42,6 +42,13 @@ public sealed class BackendConnectionOptions
     /// </summary>
     public int ReconnectJitterMaxMilliseconds { get; set; }
 
+    /// <summary>
+    /// Bounded exponential FULL jitter (CO-DEV-BKP-001 §8): each reconnect delay is uniform in
+    /// [1s, exponential cap]. Recommended for production fleets (set in appsettings.json);
+    /// when true it replaces the additive <see cref="ReconnectJitterMaxMilliseconds"/>.
+    /// </summary>
+    public bool ReconnectFullJitter { get; set; }
+
     public int HeartbeatIntervalSeconds { get; set; } = 15;
 
     public int TelemetryIntervalSeconds { get; set; } = 10;

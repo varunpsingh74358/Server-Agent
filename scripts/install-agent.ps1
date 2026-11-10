@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Installs (or upgrades) CloudOrc Control Agent + Watchdog Agent as Windows Services on
@@ -86,10 +86,22 @@ param(
     [string]$RepositoryName = "",
     [string]$GitHubToken = "",
     [string]$InstallRoot = "C:\Program Files\CloudOrc\Agents",
+    # Local package (e.g. copied over by an existing agent or a file share). The checksum is
+    # still verified before anything is extracted.
+    [string]$PackagePath = "",
+    [string]$ChecksumPath = "",
+    # One-time ENR- enrollment token (CO-DEV-BKP-001 section 4). When given, the agent is
+    # (re-)enrolled after the files are deployed and before the services start, so an upgraded
+    # agent receives its device key binding, command-signing key and mTLS certificate.
+    [string]$EnrollToken = "",
     [switch]$SkipHealthCheck
 )
 
 $ErrorActionPreference = "Stop"
+# PowerShell variable names are case-insensitive: $checksumPath (the download target, below) would
+# overwrite the -ChecksumPath parameter, so the local-package parameters are copied first.
+$localPackageSource = $PackagePath
+$localChecksumSource = $ChecksumPath
 $PackageAssetName = "CloudOrcAgents-win-x64.zip"
 $ChecksumAssetName = "CloudOrcAgents-win-x64.sha256"
 $ControlAgentServiceName = "CloudOrcControlAgent"
@@ -137,7 +149,9 @@ Step "Resolving release download URLs"
 $usingGitHubApi = $false
 $githubAssetIds = $null
 
-if ($ReleaseUrl -and $ChecksumUrl) {
+if ($PackagePath -and $ChecksumPath) {
+    Write-Host "  Using local -PackagePath / -ChecksumPath."
+} elseif ($ReleaseUrl -and $ChecksumUrl) {
     Write-Host "  Using explicit -ReleaseUrl / -ChecksumUrl."
 } elseif ($Version -and $RepositoryOwner -and $RepositoryName) {
     $ReleaseUrl = "https://github.com/$RepositoryOwner/$RepositoryName/releases/download/$Version/$PackageAssetName"
@@ -155,7 +169,7 @@ if ($ReleaseUrl -and $ChecksumUrl) {
         Write-Host "  section 'Private GitHub repository limitations', if this repository is private." -ForegroundColor Yellow
     }
 } else {
-    Fail "Provide either (-ReleaseUrl AND -ChecksumUrl), or all of (-Version AND -RepositoryOwner AND -RepositoryName)."
+    Fail "Provide (-PackagePath AND -ChecksumPath), (-ReleaseUrl AND -ChecksumUrl), or all of (-Version AND -RepositoryOwner AND -RepositoryName)."
 }
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -206,7 +220,10 @@ function Get-GitHubReleaseAsset {
 
 Step "Downloading release package"
 try {
-    if ($usingGitHubApi) {
+    if ($localPackageSource -and $localChecksumSource) {
+        Copy-Item -LiteralPath $localPackageSource -Destination $zipPath -Force
+        Copy-Item -LiteralPath $localChecksumSource -Destination $checksumPath -Force
+    } elseif ($usingGitHubApi) {
         Get-GitHubReleaseAsset -Owner $RepositoryOwner -Repo $RepositoryName -Tag $Version -AssetName $PackageAssetName -Token $GitHubToken -OutFile $zipPath
         Get-GitHubReleaseAsset -Owner $RepositoryOwner -Repo $RepositoryName -Tag $Version -AssetName $ChecksumAssetName -Token $GitHubToken -OutFile $checksumPath
     } else {
@@ -276,6 +293,33 @@ $isUpgrade = (Test-Path $controlAgentInstallDir) -or (Test-ServiceExists $Contro
 Write-Host "`n>>> $(if ($isUpgrade) { 'Upgrading existing installation' } else { 'Fresh installation' })" -ForegroundColor Cyan
 
 # ----------------------------------------------------------------------------
+# 6b. Enrollment (optional) - done with the NEW agent binary from the extracted package BEFORE
+#     anything installed is touched, so a failed enrollment can never leave a server with its
+#     services stopped. The existing appsettings.json is used so the same data directory is hit.
+# ----------------------------------------------------------------------------
+if ($EnrollToken) {
+    Step "Enrolling the agent (one-time token)"
+    $existingConfig = Join-Path $controlAgentInstallDir "appsettings.json"
+    if (Test-Path $existingConfig) { Copy-Item $existingConfig (Join-Path $extractedControlAgent "appsettings.json") -Force }
+    & (Join-Path $extractedControlAgent "CloudOrc.ControlAgent.exe") enroll --token $EnrollToken
+    $enrollExit = $LASTEXITCODE
+    if ($enrollExit -ne 0) {
+        if ($isUpgrade) {
+            Write-Host "  WARNING: enrollment failed (exit code $enrollExit). Continuing the upgrade with the EXISTING enrollment." -ForegroundColor Yellow
+        } else {
+            Fail "Enrollment failed (exit code $enrollExit). Nothing was installed."
+        }
+    } else {
+        Write-Host "  Enrollment succeeded."
+    }
+}
+
+# Everything from here on runs inside try/finally: whatever fails, the services are started
+# again at the end so the server never stays without its agent.
+$servicesShouldRun = $true
+try {
+
+# ----------------------------------------------------------------------------
 # 7. Stop existing services (Watchdog first, so it doesn't react to the
 #    Control Agent stopping intentionally), if present
 # ----------------------------------------------------------------------------
@@ -335,6 +379,21 @@ New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 Deploy-Agent -Name "Control Agent" -SourceDir $extractedControlAgent -TargetDir $controlAgentInstallDir
 Deploy-Agent -Name "Watchdog Agent" -SourceDir $extractedWatchdogAgent -TargetDir $watchdogAgentInstallDir
 
+# Backup components (CO-DEV-BKP-001): the Backup Worker, signed-update Updater, Tray status app
+# and the pinned backup engines live next to ControlAgent - the agent resolves them relative to
+# its own install root. Optional so older packages without them still install.
+foreach ($component in @("BackupWorker", "Updater", "Tray", "Engines")) {
+    $componentSource = Join-Path $extractDir "CloudOrcAgents-win-x64\$component"
+    if (Test-Path $componentSource) {
+        Deploy-Agent -Name $component -SourceDir $componentSource -TargetDir (Join-Path $InstallRoot $component)
+    } else {
+        Write-Host "  Package has no $component - skipped." -ForegroundColor Yellow
+    }
+}
+if (-not (Test-Path (Join-Path $InstallRoot "Engines\engines.manifest.json"))) {
+    Write-Host "  WARNING: no backup engines installed - this agent will not advertise backup.v1." -ForegroundColor Yellow
+}
+
 # ----------------------------------------------------------------------------
 # 9. Create or update Windows Services (idempotent - never duplicates)
 # ----------------------------------------------------------------------------
@@ -380,11 +439,20 @@ Install-OrUpdateService -Name $WatchdogServiceName -DisplayName "CloudOrc Watchd
 # ----------------------------------------------------------------------------
 # 10. Start services (Control Agent first, then Watchdog)
 # ----------------------------------------------------------------------------
-Step "Starting services"
-Start-Service -Name $ControlAgentServiceName
-Start-Sleep -Seconds 2
-Start-Service -Name $WatchdogServiceName
-Start-Sleep -Seconds 2
+}
+catch {
+    Write-Host "`nERROR during deploy: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  The services are restarted below so the agent comes back." -ForegroundColor Yellow
+}
+finally {
+    Step "Starting services"
+    foreach ($svc in @($ControlAgentServiceName, $WatchdogServiceName)) {
+        if (Test-ServiceExists $svc) {
+            try { Start-Service -Name $svc -ErrorAction Stop } catch { Write-Host "  Could not start '$svc': $($_.Exception.Message)" -ForegroundColor Red }
+            Start-Sleep -Seconds 2
+        }
+    }
+}
 
 # ----------------------------------------------------------------------------
 # 11. Verify + basic health check

@@ -25,7 +25,9 @@ public sealed class LocalFileCommandSourceTests : IDisposable
         {
             DataDirectory = _root,
             PollIntervalSeconds = 1,
-            FileStabilityMilliseconds = 0
+            FileStabilityMilliseconds = 0,
+            // These tests cover file mechanics; the folder-permission guard has its own tests.
+            LocalFileRequireProtectedDirectory = false
         };
 
         Directory.CreateDirectory(_options.CommandsDirectory);

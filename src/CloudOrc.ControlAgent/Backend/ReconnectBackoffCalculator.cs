@@ -26,6 +26,16 @@ public sealed class ReconnectBackoffCalculator(BackendConnectionOptions options)
         seconds = Math.Min(seconds, options.ReconnectMaximumDelaySeconds);
         var delay = TimeSpan.FromSeconds(seconds);
 
+        // CO-DEV-BKP-001 §8: "Use bounded exponential full jitter for reconnects". Full jitter
+        // picks uniformly in [1s, cap] so a fleet that lost the backend at the same instant does
+        // not come back in synchronized waves. Opt-in (ReconnectFullJitter) so the exact-value
+        // behaviour above stays the default for existing deterministic tests/local runs.
+        if (options.ReconnectFullJitter)
+        {
+            var floor = Math.Min(1.0, seconds);
+            return TimeSpan.FromSeconds(floor + (Random.Shared.NextDouble() * (seconds - floor)));
+        }
+
         // Additive jitter, off by default (ReconnectJitterMaxMilliseconds = 0) so every
         // existing exact-value test/behavior is unaffected unless an operator opts in.
         if (options.ReconnectJitterMaxMilliseconds > 0)

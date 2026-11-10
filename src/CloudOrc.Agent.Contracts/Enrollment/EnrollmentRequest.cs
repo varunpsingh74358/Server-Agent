@@ -20,4 +20,19 @@ public sealed class EnrollmentRequest
 
     [JsonPropertyName("agentVersion")]
     public required string AgentVersion { get; init; }
+
+    /// <summary>Optional: random per-install id for duplicate/reimage detection (§4). Ignored by older backends.</summary>
+    [JsonPropertyName("installationId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InstallationId { get; init; }
+
+    /// <summary>Optional: device public key (base64 SPKI) for later session-renewal proofs (§4, §12).</summary>
+    [JsonPropertyName("devicePublicKey")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DevicePublicKey { get; init; }
+
+    /// <summary>Optional: CSR (PEM) for an mTLS client certificate.</summary>
+    [JsonPropertyName("csrPem")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CsrPem { get; init; }
 }

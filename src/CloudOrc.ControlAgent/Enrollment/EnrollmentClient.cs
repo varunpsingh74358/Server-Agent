@@ -20,7 +20,8 @@ public sealed class EnrollmentClient(HttpClient httpClient)
         string machineId,
         string machineName,
         string agentVersion,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DeviceProof? proof = null)
     {
         if (!EnrollmentToken.TryDecode(token, out var decoded))
         {
@@ -32,7 +33,10 @@ public sealed class EnrollmentClient(HttpClient httpClient)
             Secret = decoded!.Secret,
             MachineId = machineId,
             MachineName = machineName,
-            AgentVersion = agentVersion
+            AgentVersion = agentVersion,
+            InstallationId = proof?.InstallationId,
+            DevicePublicKey = proof?.DevicePublicKey,
+            CsrPem = proof?.CsrPem
         };
 
         HttpResponseMessage response;

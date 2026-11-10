@@ -56,6 +56,11 @@ jobs:
           Write-Host "Release version: $version"
           "version=$version" >> $env:GITHUB_OUTPUT
 
+      # CO-DEV-BKP-001: ship the pinned, SHA-256-verified backup engines (engines/engines.lock.json).
+      - name: Fetch pinned backup engines
+        shell: pwsh
+        run: ./scripts/fetch-engines.ps1
+
       - name: Package release (publish + zip + checksum)
         shell: pwsh
         # Tests already ran as their own step above - skip re-running them inside the

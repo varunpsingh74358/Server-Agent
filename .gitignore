@@ -76,3 +76,6 @@ Thumbs.db
 
 ## Local AI-assistant tool state (session-local, not project source)
 .claude/
+
+# Downloaded, hash-verified backup engines (scripts/fetch-engines.ps1)
+engines/dist/

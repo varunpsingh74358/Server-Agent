@@ -30,6 +30,7 @@ public sealed class LocalFileCommandSource(
     ILogger<LocalFileCommandSource> logger) : ICommandSource
 {
     private readonly ControlAgentOptions _options = options.Value;
+    private bool _unsafeDirectoryLogged;
     private readonly ConcurrentDictionary<string, byte> _claimedCommandIds = new(StringComparer.OrdinalIgnoreCase);
 
     public async IAsyncEnumerable<CommandJob> GetCommandsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
@@ -43,7 +44,25 @@ public sealed class LocalFileCommandSource(
             List<string> candidateFiles;
             try
             {
-                candidateFiles = [.. Directory.EnumerateFiles(_options.CommandsDirectory, "*.json").OrderBy(f => f)];
+                // §10: never execute command files from a folder ordinary users can write to (they would
+                // run as SYSTEM). Startup hardening normally guarantees this; this is the fail-safe.
+                if (_options.LocalFileRequireProtectedDirectory && OperatingSystem.IsWindows()
+                    && !Startup.DataDirectoryAcl.IsWritableOnlyByPrivileged(_options.CommandsDirectory, out var offender))
+                {
+                    if (!_unsafeDirectoryLogged)
+                    {
+                        _unsafeDirectoryLogged = true;
+                        logger.LogError("Local command files are NOT executed: {Directory} is writable by a non-administrative principal ({Sid}).",
+                            _options.CommandsDirectory, offender);
+                    }
+
+                    candidateFiles = [];
+                }
+                else
+                {
+                    _unsafeDirectoryLogged = false;
+                    candidateFiles = [.. Directory.EnumerateFiles(_options.CommandsDirectory, "*.json").OrderBy(f => f)];
+                }
             }
             catch (IOException ex)
             {
@@ -143,6 +162,15 @@ public sealed class LocalFileCommandSource(
         {
             logger.LogWarning("Command file {File} failed validation: {Error}", fileName, validation.Error);
             HandleInvalidCommand(request, claimedPath, fileName, validation.Error!);
+            return null;
+        }
+
+        // §10 "no arbitrary shell by default": script execution can be switched off entirely.
+
+        if (!_options.PowerShellExecEnabled && !string.Equals(request!.CommandType, CommandTypes.RdpTransferPolicyApply, StringComparison.Ordinal))
+        {
+            logger.LogWarning("Command file {File} rejected: powershell-exec is disabled on this agent.", fileName);
+            HandleInvalidCommand(request, claimedPath, fileName, "powershell-exec is disabled on this agent.");
             return null;
         }
 
