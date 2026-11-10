@@ -79,6 +79,14 @@ public sealed class BackupRunParameters
 
     [JsonPropertyName("reason")]
     public string? Reason { get; init; }
+
+    /// <summary>
+    /// Optional profile for this one run (eco|balanced|throughput). A person pressing "Back up now"
+    /// is waiting for the result, so on-demand runs default to at least Balanced; the adaptive
+    /// governor still slows the job down whenever the server is busy (§7).
+    /// </summary>
+    [JsonPropertyName("resourceProfile")]
+    public string? ResourceProfile { get; init; }
 }
 
 public sealed class JobCancelParameters

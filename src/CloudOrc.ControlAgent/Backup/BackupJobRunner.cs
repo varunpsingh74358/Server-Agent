@@ -322,7 +322,8 @@ public sealed class BackupJobRunner(
                 var estimate = policies.GetScheduleState(policy.PolicyId).LastSourceBytes ?? 0;
                 var volumes = policy.Sources.Select(s => Path.GetPathRoot(s.Path)!).Where(r => !string.IsNullOrEmpty(r))
                     .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                return new RunContext(policy.Repository.RepositoryId, policy.Repository.Engine, policy.ResourceProfile, estimate, volumes, policy, spec,
+                // A per-run profile (on-demand "Back up now") wins over the policy's scheduled profile.
+                return new RunContext(policy.Repository.RepositoryId, policy.Repository.Engine, spec.ResourceProfile ?? policy.ResourceProfile, estimate, volumes, policy, spec,
                     TimeSpan.FromMinutes(policy.OfflineGraceMinutes));
             }
 

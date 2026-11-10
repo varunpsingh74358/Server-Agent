@@ -116,12 +116,29 @@ public sealed class BackupRunHandler(BackupPolicyStore policies, BackupJobStore 
             MaxAttempts = policy.MaxAttempts,
             RepositoryId = policy.Repository.RepositoryId,
             Engine = policy.Repository.Engine,
-            SpecJson = new JobSpecData { PolicyEffectiveHash = policy.EffectiveHash, Reason = p.Reason ?? "on-demand", Actor = context.Actor }.ToJson(),
+            SpecJson = new JobSpecData
+            {
+                PolicyEffectiveHash = policy.EffectiveHash,
+                Reason = p.Reason ?? "on-demand",
+                Actor = context.Actor,
+                ResourceProfile = OnDemandProfile(p.ResourceProfile, policy.ResourceProfile)
+            }.ToJson(),
             CreatedAt = now
         });
 
         coordinator.Wake();
         return Task.FromResult(new TypedCommandAcceptance { Accepted = true, JobId = job.JobId, Message = $"Backup job {job.State.ToLowerInvariant()}." });
+    }
+
+    /// <summary>Requested profile if valid, else the policy's - but never below Balanced for a manual run.</summary>
+    internal static string OnDemandProfile(string? requested, string policyProfile)
+    {
+        if (requested is ResourceProfileNames.Eco or ResourceProfileNames.Balanced or ResourceProfileNames.Throughput)
+        {
+            return requested;
+        }
+
+        return policyProfile == ResourceProfileNames.Eco ? ResourceProfileNames.Balanced : policyProfile;
     }
 }
 
