@@ -27,6 +27,12 @@ public sealed class AgentCapabilitiesProvider : IAgentCapabilitiesProvider
             caps.Add(AgentCapabilities.SignedUpdateV1);
         }
 
+        if (options.Value.Enabled)
+        {
+            // discovery.browse is registered with the backup handlers (folder picker).
+            caps.Add(AgentCapabilities.DiscoveryV1);
+        }
+
         EngineVersions = ReadEngineVersions(paths.EngineDirectory);
         if (options.Value.Enabled && File.Exists(paths.WorkerExecutable) && EngineVersions is { Count: > 0 })
         {

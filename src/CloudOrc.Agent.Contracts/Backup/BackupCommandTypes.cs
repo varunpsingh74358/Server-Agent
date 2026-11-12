@@ -42,9 +42,16 @@ public static class BackupCommandTypes
     /// <summary>Asks the agent to rotate its mTLS client certificate now.</summary>
     public const string AgentCertificateRenew = "agent.certificate.renew";
 
+    /// <summary>
+    /// Lists one folder level on the endpoint for the portal's folder picker (Protection Plan
+    /// "what to back up", screens F02/W01). Read-only; limited to the signed allowedRoots.
+    /// </summary>
+    public const string DiscoveryBrowse = "discovery.browse";
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
-        PolicyApply, PolicyRemove, Run, Cancel, Verify, Maintenance, RestoreExecute, AgentUpdate, AgentCredentialRenew, AgentCertificateRenew
+        PolicyApply, PolicyRemove, Run, Cancel, Verify, Maintenance, RestoreExecute, AgentUpdate, AgentCredentialRenew, AgentCertificateRenew,
+        DiscoveryBrowse
     };
 
     public static bool IsTyped(string? commandType) => commandType is not null && All.Contains(commandType);
@@ -59,6 +66,7 @@ public static class AgentCapabilities
     public const string SessionRenewV1 = "session-renew.v1";
     public const string SignedUpdateV1 = "signed-update.v1";
     public const string DurableEventsV1 = "durable-events.v1";
+    public const string DiscoveryV1 = "discovery.v1";
 }
 
 /// <summary>Version of every backup event/command schema produced by this agent build.</summary>

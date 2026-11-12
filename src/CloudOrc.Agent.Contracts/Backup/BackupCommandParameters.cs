@@ -230,4 +230,25 @@ public sealed class TypedCommandAcceptance
 
     [JsonPropertyName("message")]
     public string? Message { get; init; }
+
+    /// <summary>Small synchronous result payload (e.g. a discovery.browse listing); null for job commands.</summary>
+    [JsonPropertyName("data")]
+    public object? Data { get; init; }
+}
+
+public sealed class DiscoveryBrowseParameters
+{
+    /// <summary>Absolute local folder to list; empty = list the allowed roots (or fixed drives).</summary>
+    [JsonPropertyName("path")]
+    public string? Path { get; init; }
+
+    /// <summary>
+    /// Folders the caller may browse inside (signed by the backend). Empty = any local fixed drive
+    /// (dedicated / external devices). On shared servers this is the customer's own folder.
+    /// </summary>
+    [JsonPropertyName("allowedRoots")]
+    public IReadOnlyList<string>? AllowedRoots { get; init; }
+
+    [JsonPropertyName("maxEntries")]
+    public int? MaxEntries { get; init; }
 }
