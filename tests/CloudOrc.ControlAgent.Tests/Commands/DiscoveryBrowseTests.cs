@@ -5,7 +5,27 @@ namespace CloudOrc.ControlAgent.Tests.Commands;
 /// <summary>Folder picker (discovery.browse): read-only, local-only, never escapes the allowed roots.</summary>
 public sealed class DiscoveryBrowseTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "cloudorc-browse-" + Guid.NewGuid().ToString("N"));
+    // The browser refuses any path that passes through a junction/symlink. Some machines (e.g. CI runners)
+    // reach %TEMP% through one, so resolve the real location first.
+    private readonly string _root = Path.Combine(RealPath(Path.GetTempPath()), "cloudorc-browse-" + Guid.NewGuid().ToString("N"));
+
+    private static string RealPath(string path)
+    {
+        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+        var parts = full.Split(Path.DirectorySeparatorChar);
+        var current = parts[0] + "\\";
+        for (var i = 1; i < parts.Length; i++)
+        {
+            current = Path.Combine(current, parts[i]);
+            var info = new DirectoryInfo(current);
+            if (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint) && info.ResolveLinkTarget(true) is { } target)
+            {
+                current = target.FullName.TrimEnd(Path.DirectorySeparatorChar);
+            }
+        }
+
+        return current;
+    }
 
     public DiscoveryBrowseTests()
     {
