@@ -138,7 +138,8 @@ public sealed partial class KopiaEngine : IBackupEngine
 
         var run = await RunAsync(ctx,
             ["snapshot", "create", source.Path, "--json", $"--parallel={Math.Max(1, ctx.Budget.Parallelism).ToString(CultureInfo.InvariantCulture)}",
-             $"--description=CloudOrc job {ctx.JobId}", $"--tags=cloudorc-job:{ctx.JobId}", "--progress", "--progress-update-interval=5s"],
+             $"--description=CloudOrc job {ctx.JobId}", $"--tags=cloudorc-job:{ctx.JobId}", "--progress", "--progress-update-interval=5s",
+             .. (options.FullScan ? new[] { "--force-hash=100" } : [])],
             ct,
             onStderr: line =>
             {

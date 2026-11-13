@@ -87,6 +87,10 @@ public sealed class BackupRunParameters
     /// </summary>
     [JsonPropertyName("resourceProfile")]
     public string? ResourceProfile { get; init; }
+
+    /// <summary>Optional backup type for this one run: "full" or "incremental" (default: the policy's).</summary>
+    [JsonPropertyName("backupMode")]
+    public string? BackupMode { get; init; }
 }
 
 public sealed class JobCancelParameters

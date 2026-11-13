@@ -149,7 +149,7 @@ public static class JobExecutor
         }
         long filesNew = 0, filesChanged = 0, filesUnchanged = 0, uploaded = 0, errors = scan.Errors;
         EngineOutcome? firstFailure = null;
-        var options = new BackupRunOptions(plan.UseVss, consistencyPolicy.VssMode, plan.UseVss ? plan.SnapshotLifetime : null, []);
+        var options = new BackupRunOptions(plan.UseVss, consistencyPolicy.VssMode, plan.UseVss ? plan.SnapshotLifetime : null, [], spec.FullScan);
 
         foreach (var source in present)
         {
@@ -248,6 +248,7 @@ public static class JobExecutor
             FilesChanged = filesChanged,
             FilesUnchanged = filesUnchanged,
             SourceBytes = scan.Bytes,
+            BackupMode = spec.FullScan ? BackupModes.Full : BackupModes.Incremental,
             BytesRead = scan.Bytes,
             BytesUploaded = uploaded,
             Errors = errors,

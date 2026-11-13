@@ -52,7 +52,7 @@ public sealed record SnapshotOutcome(
 
 public sealed record RestoreOutcome(bool Ok, string? ReasonCode, string? Message) : EngineOutcome(Ok, ReasonCode, Message);
 
-public sealed record BackupRunOptions(bool UseVss, string VssMode, TimeSpan? Timeout, IReadOnlyList<string> Excludes);
+public sealed record BackupRunOptions(bool UseVss, string VssMode, TimeSpan? Timeout, IReadOnlyList<string> Excludes, bool FullScan = false);
 
 /// <summary>
 /// Engine adapter (§14 "agent/Capabilities/Backup/EngineAdapters"; ADR-01: Kopia preferred,

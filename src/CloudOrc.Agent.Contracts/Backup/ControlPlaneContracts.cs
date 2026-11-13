@@ -263,6 +263,7 @@ public sealed class JobResultSummary
     [JsonPropertyName("files_changed")] public long? FilesChanged { get; init; }
     [JsonPropertyName("files_unchanged")] public long? FilesUnchanged { get; init; }
     [JsonPropertyName("source_bytes")] public long? SourceBytes { get; init; }
+    [JsonPropertyName("backup_mode")] public string? BackupMode { get; init; }
     [JsonPropertyName("bytes_read")] public long? BytesRead { get; init; }
     [JsonPropertyName("bytes_uploaded")] public long? BytesUploaded { get; init; }
     [JsonPropertyName("errors")] public long? Errors { get; init; }

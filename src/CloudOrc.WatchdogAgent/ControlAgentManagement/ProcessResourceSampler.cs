@@ -31,16 +31,36 @@ public sealed class ProcessResourceSampler(Func<Process?> resolveProcess)
 
             // The Watchdog only ever tracks a single Control Agent instance, matching
             // its single-service monitoring model everywhere else - use the first match
-            // and release the handles of any (unexpected) extras immediately.
-            for (var i = 1; i < candidates.Length; i++)
+            // that is still alive (one can be exiting, e.g. the old process during an
+            // update) and release the handles of all other candidates immediately.
+            Process? chosen = null;
+            foreach (var candidate in candidates)
             {
-                candidates[i].Dispose();
+                if (chosen is null && IsAlive(candidate))
+                {
+                    chosen = candidate;
+                    continue;
+                }
+
+                candidate.Dispose();
             }
 
-            return candidates[0];
+            return chosen;
         });
 
     public static ProcessResourceSampler ForCurrentProcess() => new(Process.GetCurrentProcess);
+
+    private static bool IsAlive(Process process)
+    {
+        try
+        {
+            return !process.HasExited && process.WorkingSet64 > 0;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Never throws - a process that has exited, or exits mid-read, is reported as not running rather than propagating an exception.</summary>
     public ProcessResourceSnapshot Sample()

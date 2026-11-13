@@ -72,6 +72,8 @@ public sealed class WorkerJobSpec
     [JsonPropertyName("consistency")] public BackupConsistencyPolicy? Consistency { get; init; }
     [JsonPropertyName("verification")] public BackupVerificationPolicy? Verification { get; init; }
     [JsonPropertyName("policyVersionId")] public string? PolicyVersionId { get; init; }
+    /// <summary>Full backup: re-read and re-check every file instead of trusting the change cache.</summary>
+    [JsonPropertyName("fullScan")] public bool FullScan { get; init; }
 
     // verify / restore
     [JsonPropertyName("engineSnapshotId")] public string? EngineSnapshotId { get; init; }

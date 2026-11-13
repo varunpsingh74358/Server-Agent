@@ -121,7 +121,8 @@ public sealed class BackupRunHandler(BackupPolicyStore policies, BackupJobStore 
                 PolicyEffectiveHash = policy.EffectiveHash,
                 Reason = p.Reason ?? "on-demand",
                 Actor = context.Actor,
-                ResourceProfile = OnDemandProfile(p.ResourceProfile, policy.ResourceProfile)
+                ResourceProfile = OnDemandProfile(p.ResourceProfile, policy.ResourceProfile),
+                BackupMode = BackupModes.IsKnown(p.BackupMode) ? p.BackupMode : null
             }.ToJson(),
             CreatedAt = now
         });

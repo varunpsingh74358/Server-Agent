@@ -41,6 +41,18 @@ public sealed class BackupPolicyDocument
     [JsonPropertyName("resourceProfile")]
     public string ResourceProfile { get; init; } = ResourceProfileNames.Eco;
 
+    /// <summary>
+    /// Backup type: "incremental" (default; changed files found via the engine cache), "full" (every
+    /// backup re-reads and re-checks every file) or "weekly-full" (full on <see cref="FullBackupDay"/>,
+    /// incremental on other days). Upload stays deduplicated either way; every backup restores in full.
+    /// </summary>
+    [JsonPropertyName("backupMode")]
+    public string BackupMode { get; init; } = BackupModes.Incremental;
+
+    /// <summary>For "weekly-full": the day (Monday..Sunday) whose backups re-read every file.</summary>
+    [JsonPropertyName("fullBackupDay")]
+    public string FullBackupDay { get; init; } = "Sunday";
+
     [JsonPropertyName("repository")]
     public required BackupRepositoryRef Repository { get; init; }
 
@@ -251,4 +263,30 @@ public sealed class BackupVerificationPolicy
     /// <summary>Percent of files to read back after each backup (0 disables content read-back).</summary>
     [JsonPropertyName("verifyFilesPercent")]
     public double VerifyFilesPercent { get; init; } = 1;
+}
+
+public static class BackupModes
+{
+    public const string Incremental = "incremental";
+    public const string Full = "full";
+    public const string WeeklyFull = "weekly-full";
+
+    public static bool IsKnown(string? mode) => mode is Incremental or Full or WeeklyFull;
+
+    /// <summary>
+    /// Whether this backup re-reads every file. A per-run request ("full" / "incremental") wins;
+    /// otherwise the policy decides ("weekly-full" = full on the configured local day).
+    /// </summary>
+    public static bool IsFullScan(string? requested, string? policyMode, string? fullDay, DateTimeOffset localNow)
+    {
+        if (requested == Full) return true;
+        if (requested == Incremental) return false;
+        if (policyMode == Full) return true;
+        if (policyMode == WeeklyFull)
+        {
+            return Enum.TryParse<DayOfWeek>(fullDay ?? "Sunday", true, out var day) && localNow.DayOfWeek == day;
+        }
+
+        return false;
+    }
 }

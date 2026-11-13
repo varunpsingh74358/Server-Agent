@@ -13,6 +13,7 @@ public sealed class JobSpecData
 {
     [JsonPropertyName("policyEffectiveHash")] public string? PolicyEffectiveHash { get; init; }
     [JsonPropertyName("resourceProfile")] public string? ResourceProfile { get; init; }
+    [JsonPropertyName("backupMode")] public string? BackupMode { get; init; }
     [JsonPropertyName("reason")] public string? Reason { get; init; }
     [JsonPropertyName("actor")] public string? Actor { get; init; }
     [JsonPropertyName("verify")] public VerifyParameters? Verify { get; init; }

@@ -53,6 +53,10 @@ public sealed class ResticEngine : IBackupEngine
             $"--read-concurrency={Math.Max(1, ctx.Budget.Parallelism).ToString(CultureInfo.InvariantCulture)}",
             "--one-file-system"
         };
+        if (options.FullScan)
+        {
+            args.Add("--force"); // full backup: re-read every file instead of trusting the parent snapshot
+        }
 
         if (options.UseVss)
         {

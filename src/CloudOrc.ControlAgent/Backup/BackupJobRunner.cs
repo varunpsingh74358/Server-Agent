@@ -424,7 +424,9 @@ public sealed class BackupJobRunner(
             VerifyFilesPercent = context.Spec.Verify?.VerifyFilesPercent,
             Restore = context.Spec.Restore,
             CompletedSnapshots = ReadCompletedSnapshots(job.JobId),
-            MaintenanceFull = context.Spec.Maintenance?.Full ?? true
+            MaintenanceFull = context.Spec.Maintenance?.Full ?? true,
+            FullScan = job.Kind == BackupJobKinds.Backup
+                && BackupModes.IsFullScan(context.Spec.BackupMode, context.Policy?.BackupMode, context.Policy?.FullBackupDay, time.GetLocalNow())
         };
     }
 

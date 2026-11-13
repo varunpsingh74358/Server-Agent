@@ -42,6 +42,8 @@ public static class BackupPolicyValidator
 
         Require(errors, policy.ResourceProfile is ResourceProfileNames.Eco or ResourceProfileNames.Balanced or ResourceProfileNames.Throughput,
             $"Unknown resourceProfile '{policy.ResourceProfile}'.");
+        Require(errors, BackupModes.IsKnown(policy.BackupMode), $"Unknown backupMode '{policy.BackupMode}'.");
+        Require(errors, Enum.TryParse<DayOfWeek>(policy.FullBackupDay, true, out _), $"Unknown fullBackupDay '{policy.FullBackupDay}'.");
         Require(errors, IsSafeId(policy.Repository.RepositoryId), "repository.repositoryId is required.");
         Require(errors, IsSafeId(policy.Repository.StoragePoolId), "repository.storagePoolId is required.");
         Require(errors, policy.Repository.Engine is BackupEngineNames.Kopia or BackupEngineNames.Restic,
